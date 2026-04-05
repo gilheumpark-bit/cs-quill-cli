@@ -33,8 +33,8 @@ export function ripgrepSearch(query: string, rootPath: string, opts?: {
 
   try {
     const output = execSync(
-      `rg ${caseFlag} ${regexFlag} ${globFlag} --json --max-count ${maxResults} -- "${query.replace(/["\\`$]/g, '\\$&')}" "${rootPath}" 2>/dev/null`,
-      { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024 },
+      `rg ${caseFlag} ${regexFlag} ${globFlag} --json --max-count ${maxResults} -- "${query.replace(/["\\`$]/g, '\\$&')}" "${rootPath}"`,
+      { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] },
     );
 
     const results: SearchResult[] = [];
@@ -63,8 +63,8 @@ export function ripgrepSearch(query: string, rootPath: string, opts?: {
 function grepFallback(query: string, rootPath: string, maxResults: number): SearchResult[] {
   try {
     const output = execSync(
-      `grep -rn --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" "${query.replace(/"/g, '\\"')}" "${rootPath}" 2>/dev/null | head -${maxResults}`,
-      { encoding: 'utf-8', timeout: 10000 },
+      `grep -rn --include="*.ts" --include="*.tsx" --include="*.js" --include="*.jsx" "${query.replace(/"/g, '\\"')}" "${rootPath}"`,
+      { encoding: 'utf-8', timeout: 10000, stdio: ['pipe', 'pipe', 'pipe'] },
     );
 
     return output.split('\n').filter(Boolean).map(line => {
@@ -181,8 +181,8 @@ export function symbolSearch(query: string, rootPath: string, maxResults: number
   for (const pat of patterns) {
     try {
       const output = execSync(
-        `rg --json -e "${pat.regex}" --glob "*.{ts,tsx,js,jsx}" "${rootPath}" 2>/dev/null | head -${maxResults}`,
-        { encoding: 'utf-8', timeout: 5000 },
+        `rg --json -e "${pat.regex}" --glob "*.{ts,tsx,js,jsx}" --max-count ${maxResults} "${rootPath}"`,
+        { encoding: 'utf-8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe'], env: { ...process.env, PATH: process.env.PATH } },
       );
 
       for (const line of output.split('\n').filter(Boolean)) {
@@ -202,6 +202,34 @@ export function symbolSearch(query: string, rootPath: string, maxResults: number
         } catch { /* skip */ }
       }
     } catch { /* rg not available */ }
+  }
+
+  // rg 실패 시 fs 기반 fallback
+  if (results.length === 0) {
+    try {
+      const walk = (dir: string, depth: number = 0): void => {
+        if (depth > 5 || results.length >= maxResults) return;
+        for (const entry of readdirSync(dir, { withFileTypes: true })) {
+          if (entry.name.startsWith('.') || ['node_modules', 'dist', '.next', '.git'].includes(entry.name)) continue;
+          const full = join(dir, entry.name);
+          if (entry.isDirectory()) { walk(full, depth + 1); continue; }
+          if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+          try {
+            const content = statSync(full).size < 100000 ? require('fs').readFileSync(full, 'utf-8') : '';
+            const lines = content.split('\n');
+            for (let i = 0; i < lines.length && results.length < maxResults; i++) {
+              for (const pat of patterns) {
+                const m = lines[i].match(new RegExp(pat.regex));
+                if (m?.[1]) {
+                  results.push({ name: m[1], type: pat.type, file: relative(rootPath, full), line: i + 1 });
+                }
+              }
+            }
+          } catch { /* skip */ }
+        }
+      };
+      walk(rootPath);
+    } catch { /* final fallback */ }
   }
 
   return results.slice(0, maxResults);
