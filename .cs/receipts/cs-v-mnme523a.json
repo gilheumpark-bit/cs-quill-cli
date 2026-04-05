@@ -1,0 +1,16 @@
+{
+  "id": "cs-v-mnme523a",
+  "timestamp": 1775431610326,
+  "codeHash": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+  "pipeline": {
+    "teams": [],
+    "overallScore": 100,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "a5ae3c2c36d827f64ab208d436f81529f173e172f7d36dd0b5819c93eeb070cb"
+}

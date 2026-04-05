@@ -97,6 +97,8 @@ interface VerifyOptions {
   format: string;
   watch?: boolean;
   parallel?: boolean;
+  diff?: boolean;
+  baseline?: boolean;
 }
 
 interface TeamResult {
@@ -121,16 +123,36 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const startTime = performance.now();
   const { printHeader, printScore, printSection, icons, colors } = require('../core/terminal-compat');
 
-  printHeader('8팀 검증');
+  printHeader(opts.diff ? '증분 검증 (git diff)' : '8팀 검증');
   console.log('');
 
-  // Discover files
-  const files = discoverFiles(path);
+  // Discover files — --diff 모드: git 변경 파일만
+  let files: SourceFile[];
+  if (opts.diff) {
+    try {
+      const { execSync } = require('child_process');
+      const diffOutput = execSync('git diff --name-only HEAD', { encoding: 'utf-8', cwd: path === '.' ? process.cwd() : path });
+      const stagedOutput = execSync('git diff --name-only --cached', { encoding: 'utf-8', cwd: path === '.' ? process.cwd() : path });
+      const changedFiles = new Set([...diffOutput.split('\n'), ...stagedOutput.split('\n')].map(f => f.trim()).filter(Boolean));
+      const allFiles = discoverFiles(path);
+      files = allFiles.filter(f => changedFiles.has(f.relativePath) || changedFiles.has(f.relativePath.replace(/\\/g, '/')));
+      if (files.length === 0) {
+        console.log(`  ${icons.pass} 변경된 파일 없음 — 검증 통과`);
+        return;
+      }
+      console.log(`  ${icons.folder} git diff: ${changedFiles.size}개 변경, ${files.length}개 검증 대상`);
+    } catch {
+      console.log(`  ${icons.warn} git 사용 불가 — 전체 스캔으로 전환`);
+      files = discoverFiles(path);
+    }
+  } else {
+    files = discoverFiles(path);
+  }
   if (files.length === 0) {
     console.log(`  ${icons.warn}  검증할 파일이 없습니다.`);
     return;
   }
-  console.log(`  ${icons.folder} ${files.length}개 파일 발견`);
+  if (!opts.diff) console.log(`  ${icons.folder} ${files.length}개 파일 발견`);
   const useParallel = opts.parallel && files.length > 3;
   if (useParallel) console.log(`  ${icons.rocket} 워커풀 병렬 모드 (${Math.min(files.length, 4)} workers)`);
   console.log('');
@@ -193,24 +215,68 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     return await runStaticPipeline(file.content, file.language);
   }
 
-  // ── 순차 실행 (enhanced pipeline 사용을 위해 순차로 통일) ──
+  // ── 순차 실행 + 파일별 AI 판정 ──
   const allDetails: Array<{ line: number; message: string; severity: string }> = [];
+  let aiVerified = false;
+  let falsePositivesRemoved = 0;
+  let aiOrchestrator: any = null;
+  try {
+    aiOrchestrator = require('../ai/verify-orchestrator');
+  } catch { /* AI 미설정 */ }
+
   {
-    for (const file of files) {
+    for (let fi = 0; fi < files.length; fi++) {
+      const file = files[fi];
+      process.stdout.write(`\r  ${icons.clock} ${fi + 1}/${files.length} 파일 검증 중...`);
       const result = await verifyOneFile(file);
+
       // enhanced _details 수집
-      if ((result as any)._details) {
-        allDetails.push(...(result as any)._details);
+      const fileDetails: Array<{ line: number; message: string; severity: string }> = (result as any)._details ?? [];
+
+      // ── 파일별 AI cross-judge 오탐 필터 ──
+      if (aiOrchestrator && fileDetails.length > 0) {
+        try {
+          const aiResult = await aiOrchestrator.orchestrateVerify(
+            file.content.slice(0, 4000),
+            {
+              teams: (result.teams ?? []).map((t: any) => ({
+                name: t.name,
+                score: t.score ?? 50,
+                findings: t.findings.map((f: any) => typeof f === 'string'
+                  ? { line: 0, message: f, severity: 'warning' }
+                  : { line: f.line ?? 0, message: f.message ?? f, severity: f.severity ?? 'warning' }),
+              })),
+              overallScore: result.overallScore ?? 50,
+              overallStatus: 'unknown',
+            },
+            file.relativePath,
+          );
+          if (aiResult.aiVerified && aiResult.falsePositivesRemoved > 0) {
+            aiVerified = true;
+            falsePositivesRemoved += aiResult.falsePositivesRemoved;
+            // AI가 걸러낸 결과로 교체
+            for (const refined of aiResult.teams) {
+              const stage = (result.teams ?? []).find((t: any) => t.name === refined.name);
+              if (stage) {
+                stage.findings = refined.findings.map((f: any) => typeof f === 'string' ? f : f.message ?? f);
+                if (stage.score !== undefined) stage.score = refined.score;
+              }
+            }
+          }
+        } catch { /* AI 호출 실패 — static 결과 유지 */ }
       }
+
+      allDetails.push(...fileDetails);
       for (const stage of result.teams ?? (result as any).stages ?? []) {
         const scores = allTeamScores.get(stage.name) ?? [];
         scores.push(stage.score);
         allTeamScores.set(stage.name, scores);
         const findings = allTeamFindings.get(stage.name) ?? 0;
-        allTeamFindings.set(stage.name, findings + stage.findings.length);
-        totalFindings += stage.findings.length;
+        allTeamFindings.set(stage.name, findings + (Array.isArray(stage.findings) ? stage.findings.length : 0));
+        totalFindings += Array.isArray(stage.findings) ? stage.findings.length : 0;
       }
     }
+    console.log(''); // progress 줄바꿈
   }
 
   // Aggregate team results
@@ -236,42 +302,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     console.log(`\n  🔬 AST 심층분석: ${astFindingsTotal}건 추가 발견 (Level 2 정밀도)`);
   }
 
-  // ── AI Orchestrator: team-lead + cross-judge 오탐 필터 ──
-  let aiVerified = false;
-  let falsePositivesRemoved = 0;
-  try {
-    const { orchestrateVerify } = require('../ai/verify-orchestrator');
-    const staticTeams = teams.map(t => ({
-      name: t.name,
-      score: t.score,
-      findings: t.details.length > 0
-        ? t.details.map(d => ({ line: d.line, message: d.message, severity: d.severity }))
-        : Array.from({ length: t.findings }, (_, i) => ({ line: 0, message: `finding-${i}`, severity: 'warning' })),
-    }));
-    const sampleCode = files.slice(0, 3).map(f => f.content).join('\n').slice(0, 8000);
-    const aiResult = await orchestrateVerify(sampleCode, {
-      teams: staticTeams,
-      overallScore: Math.round(teams.reduce((s, t) => s + t.score, 0) / Math.max(teams.length, 1)),
-      overallStatus: 'unknown',
-    }, files[0]?.relativePath ?? 'unknown');
-
-    if (aiResult.aiVerified) {
-      aiVerified = true;
-      falsePositivesRemoved = aiResult.falsePositivesRemoved;
-      // AI 결과로 팀 점수 갱신
-      for (const refined of aiResult.teams) {
-        const existing = teams.find(t => t.name === refined.name);
-        if (existing) {
-          existing.score = refined.score;
-          existing.findings = refined.findings.length;
-          existing.details = refined.findings.map(f => ({ line: f.line, message: f.message, severity: f.severity }));
-          existing.passed = existing.blocking ? refined.score >= threshold : true;
-        }
-      }
-    }
-  } catch {
-    // AI 미설정 또는 호출 실패 → static 결과 유지
-  }
+  // AI orchestrator는 파일별 실행으로 이동 (위 순차 실행 루프 참조)
 
   // ── Verdict 집계 — 메시지 기반 3단계 분류 ──
   function classifyLevel(severity: string, _message: string): 'hard-fail' | 'review' | 'note' {
