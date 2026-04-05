@@ -121,8 +121,8 @@ export async function runStaticPipeline(code: string, language: string): Promise
     findings: (t.findings as any[]).slice(0, 15).map((f: any) => ({
       ruleId: `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`,
       line: f.line ?? 0,
-      level: mapSeverityToLevel(f.severity ?? 'warning'),
-      confidence: mapSeverityToConfidence(f.severity ?? 'warning'),
+      level: mapToLevel(f.severity ?? 'warning', f.message ?? ''),
+      confidence: mapToConfidence(f.severity ?? 'warning', f.message ?? ''),
       message: f.message ?? String(f),
     })),
   }));
@@ -147,17 +147,30 @@ export async function runStaticPipeline(code: string, language: string): Promise
   };
 }
 
-// ── Level/Confidence 변환 헬퍼 ──
-function mapSeverityToLevel(severity: string): FindingLevel {
-  if (severity === 'error' || severity === 'critical') return 'hard-fail';
-  if (severity === 'warning') return 'review-required';
-  return 'style-note';
+// ── Level/Confidence 변환 헬퍼 — 메시지 기반 정밀 분류 ──
+function mapToLevel(severity: string, message: string): FindingLevel {
+  const msg = message.toLowerCase();
+
+  // hard-fail: 빌드/런타임 깨지는 실제 위험
+  if (severity === 'critical') return 'hard-fail';
+  if (/eval\(\)|new function|보안 위험|security|xss|injection|개인키|패스워드|password/i.test(msg)) return 'hard-fail';
+  if (/빈 함수|empty function|brace.*balance|syntax error|parse error/i.test(msg)) return 'hard-fail';
+
+  // style-note: 품질 힌트, 실행에 영향 없음
+  if (/console\.(log|debug)|줄 길이|120자|300줄|TODO|FIXME|HACK|@ts-ignore|삼항|중첩 삼항/i.test(msg)) return 'style-note';
+  if (/info|파라미터.*개|미사용|unused|dead|unreachable/i.test(msg)) return 'style-note';
+  if (severity === 'info') return 'style-note';
+
+  // review-required: 사람이 판단해야 하는 것
+  return 'review-required';
 }
 
-function mapSeverityToConfidence(severity: string): 'high' | 'medium' | 'low' {
-  if (severity === 'error' || severity === 'critical') return 'high';
-  if (severity === 'warning') return 'medium';
-  return 'low';
+function mapToConfidence(severity: string, message: string): 'high' | 'medium' | 'low' {
+  if (severity === 'critical' || severity === 'error') return 'high';
+  const msg = message.toLowerCase();
+  if (/eval|빈 함수|empty function|security|xss/i.test(msg)) return 'high';
+  if (/console|todo|fixme|줄 길이|삼항/i.test(msg)) return 'low';
+  return 'medium';
 }
 
 // IDENTITY_SEAL: PART-1 | role=pipeline | inputs=code,language | outputs=PipelineResult

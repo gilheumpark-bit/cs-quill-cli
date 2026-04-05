@@ -1,0 +1,38 @@
+{
+  "id": "cs-v-mnmc0d90",
+  "timestamp": 1775428032276,
+  "codeHash": "3fdba35f04dc8c462986c992bcf875546257113072a909c162f7e470e581e278",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "governance",
+        "score": 100,
+        "blocking": false,
+        "findings": 0,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 80,
+        "blocking": false,
+        "findings": 4,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 80,
+        "blocking": false,
+        "findings": 4,
+        "passed": true
+      }
+    ],
+    "overallScore": 100,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "709c88612ecc834b7f909bdbaac1bd99b22d2fda4d9701d8d25a5dc932f6cad0"
+}

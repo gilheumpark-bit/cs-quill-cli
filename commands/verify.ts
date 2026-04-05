@@ -165,21 +165,25 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
           overallScore: enhanced.combinedScore,
           overallStatus: enhanced.combinedScore >= 80 ? 'pass' : enhanced.combinedScore >= 60 ? 'warn' : 'fail',
         };
-        // enhanced의 combinedScore를 신뢰하고 팀별 findings만 집계
-        const teamMap = new Map<string, { findings: string[] }>();
+        // enhanced의 findings를 팀별로 집계 (severity 보존)
+        const teamMap = new Map<string, { findings: Array<{ message: string; severity: string; line: number }> }>();
         for (const f of enhanced.findings) {
           const team = teamMap.get(f.team) ?? { findings: [] };
-          if (team.findings.length < 10) team.findings.push(f.message);
+          if (team.findings.length < 15) {
+            team.findings.push({ message: f.message, severity: f.severity, line: f.line ?? 0 });
+          }
           teamMap.set(f.team, team);
         }
-        // 팀별 점수: combinedScore를 기반으로 findings 비율에 따라 분배
         const totalFindingCount = enhanced.findings.length || 1;
         for (const [name, data] of teamMap) {
           const teamRatio = data.findings.length / totalFindingCount;
-          // findings가 많은 팀일수록 낮은 점수, 적은 팀일수록 높은 점수
           const teamScore = Math.max(0, Math.round(enhanced.combinedScore * (1 - teamRatio * 0.5)));
-          result.teams.push({ name, score: teamScore, findings: data.findings });
+          result.teams.push({ name, score: teamScore, findings: data.findings.map(f => f.message) });
         }
+        // details에 severity 포함해서 verdict 집계에 사용
+        (result as any)._details = enhanced.findings.map(f => ({
+          line: f.line ?? 0, message: f.message, severity: f.severity,
+        }));
         return result;
       } catch (enhErr) {
         if (process.env.CS_DEBUG) console.error(`  [DEBUG] enhanced failed for ${file.relativePath}:`, (enhErr as Error).message?.slice(0, 100));
@@ -190,9 +194,14 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   }
 
   // ── 순차 실행 (enhanced pipeline 사용을 위해 순차로 통일) ──
+  const allDetails: Array<{ line: number; message: string; severity: string }> = [];
   {
     for (const file of files) {
       const result = await verifyOneFile(file);
+      // enhanced _details 수집
+      if ((result as any)._details) {
+        allDetails.push(...(result as any)._details);
+      }
       for (const stage of result.teams ?? (result as any).stages ?? []) {
         const scores = allTeamScores.get(stage.name) ?? [];
         scores.push(stage.score);
@@ -264,10 +273,32 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     // AI 미설정 또는 호출 실패 → static 결과 유지
   }
 
-  // ── Verdict 집계 ──
-  const allHardFail = teams.reduce((s, t) => s + (t.details?.filter(d => d.severity === 'error' || d.severity === 'critical').length ?? 0), 0);
-  const allReview = teams.reduce((s, t) => s + (t.details?.filter(d => d.severity === 'warning').length ?? 0), 0);
-  const allNote = totalFindings - allHardFail - allReview;
+  // ── Verdict 집계 — 메시지 기반 3단계 분류 ──
+  function classifyLevel(severity: string, message: string): 'hard-fail' | 'review' | 'note' {
+    const msg = message.toLowerCase();
+    if (severity === 'critical') return 'hard-fail';
+    if (/eval\(\)|new function|보안 위험|security|xss|injection|개인키|패스워드|password/i.test(msg)) return 'hard-fail';
+    if (/빈 함수|empty function|brace.*balance|syntax error|parse error/i.test(msg)) return 'hard-fail';
+    if (/console\.(log|debug)|줄 길이|120자|300줄|TODO|FIXME|HACK|@ts-ignore|삼항|중첩 삼항/i.test(msg)) return 'note';
+    if (/info|파라미터.*개|미사용|unused|dead|unreachable/i.test(msg)) return 'note';
+    if (severity === 'info') return 'note';
+    return 'review';
+  }
+
+  let allHardFail = 0, allReview = 0, allNote = 0;
+  // enhanced _details가 있으면 그걸로 정밀 분류
+  const detailSource = allDetails.length > 0 ? allDetails
+    : teams.flatMap(t => t.details ?? []);
+  for (const d of detailSource) {
+    const level = classifyLevel(d.severity, d.message);
+    if (level === 'hard-fail') allHardFail++;
+    else if (level === 'review') allReview++;
+    else allNote++;
+  }
+  // 아무 detail도 없으면 findings 수로 추정
+  if (allHardFail + allReview + allNote === 0) {
+    allReview = totalFindings;
+  }
 
   const overallVerdict = allHardFail > 0 ? 'FAIL' : allReview > 5 ? 'REVIEW' : 'PASS';
   const overallScore = overallVerdict === 'PASS' ? 100
@@ -286,14 +317,23 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     return;
   }
 
-  // Verdict format — 팀별 findings 수 + level 표시
+  // Verdict format — 팀별 3단계 분류 표시
   for (const team of teams) {
-    const hf = team.details?.filter(d => d.severity === 'error' || d.severity === 'critical').length ?? 0;
-    const rr = team.details?.filter(d => d.severity === 'warning').length ?? 0;
+    let hf = 0, rr = 0, sn = 0;
+    for (const d of (team.details ?? [])) {
+      const lv = classifyLevel(d.severity, d.message);
+      if (lv === 'hard-fail') hf++;
+      else if (lv === 'review') rr++;
+      else sn++;
+    }
+    // details 없으면 findings 수로 추정
+    if (hf + rr + sn === 0 && team.findings > 0) rr = team.findings;
+
     const label = hf > 0 ? colors.red(`✖ ${team.name}`) : rr > 0 ? colors.yellow(`△ ${team.name}`) : colors.green(`✔ ${team.name}`);
     const counts = [
       hf > 0 ? colors.red(`${hf} hard-fail`) : '',
       rr > 0 ? colors.yellow(`${rr} review`) : '',
+      sn > 0 ? `${sn} note` : '',
     ].filter(Boolean).join(', ') || colors.green('clean');
     console.log(`  ${label.padEnd(35)} ${counts}`);
   }

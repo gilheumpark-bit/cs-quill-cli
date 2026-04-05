@@ -1,11 +1,11 @@
-import { Project, SyntaxKind, TypeGuards, Node } from 'ts-morph';
+import { Project, SyntaxKind, Node } from 'ts-morph';
 import * as fs from 'fs';
 import * as path from 'path';
 
 // 경로 설정
-const WEB_PROJECT_DIR = 'C:\\Users\\sung4\\OneDrive\\바탕 화면\\EH\\eh-universe-web';
+const WEB_PROJECT_DIR = 'C:\\Users\\sung4\\OneDrive\\바탕 화면\\EH\\eh-universe-vscode';
 const TSCONFIG_PATH = path.join(WEB_PROJECT_DIR, 'tsconfig.json');
-const OUTPUT_REPORT_PATH = 'C:\\Users\\sung4\\.gemini\\antigravity\\brain\\3d3d9d2a-d5da-437b-9641-88bfbbdf0723\\diagnosis_report.md';
+const OUTPUT_REPORT_PATH = 'C:\\Users\\sung4\\.gemini\\antigravity\\brain\\3d3d9d2a-d5da-437b-9641-88bfbbdf0723\\vscode_diagnosis_report.md';
 
 console.log('Loading TypeScript Project...');
 const project = new Project({
@@ -127,7 +127,7 @@ for (const sourceFile of sourceFiles) {
 
 console.log('Generating MarkDown Report...');
 
-let mdContent = `# EH-Universe-Web 정밀 진단 리포트\n\n`;
+let mdContent = `# EH-Universe-VSCode 정밀 진단 리포트\n\n`;
 mdContent += `**총 분석된 파일 수:** ${sourceFiles.length} 개\n`;
 mdContent += `**총 스텁(미구현) 함수 수:** ${stubCount} 개\n`;
 mdContent += `**발견된 할일(TODO/미구현) 수:** ${todoCount} 개\n\n`;

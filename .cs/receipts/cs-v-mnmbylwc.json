@@ -1,0 +1,66 @@
+{
+  "id": "cs-v-mnmbylwc",
+  "timestamp": 1775427950172,
+  "codeHash": "031b4af5197ec30a926f48cf40e11a7dbc470048a21e4003b7a3c07c5dab1baa",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "validation",
+        "score": 50,
+        "blocking": true,
+        "findings": 10,
+        "passed": false
+      },
+      {
+        "name": "release-ip",
+        "score": 65,
+        "blocking": true,
+        "findings": 7,
+        "passed": false
+      },
+      {
+        "name": "stability",
+        "score": 90,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 50,
+        "blocking": false,
+        "findings": 10,
+        "passed": true
+      },
+      {
+        "name": "generation",
+        "score": 90,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "governance",
+        "score": 50,
+        "blocking": false,
+        "findings": 10,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 50,
+        "blocking": false,
+        "findings": 10,
+        "passed": true
+      }
+    ],
+    "overallScore": 60,
+    "overallStatus": "review"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "7d7f69226c074ff32f968e5b154db72bd19badc43e966b58744ee436eb7afe3c"
+}
