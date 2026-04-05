@@ -18,8 +18,8 @@ export async function runLearn(topic?: string): Promise<void> {
   // Topic-specific learning
   if (topic) {
     try {
-      const { streamChat } = await import('../core/ai-bridge');
-      const { getTemperature } = await import('../core/ai-config');
+      const { streamChat } = require('../core/ai-bridge');
+      const { getTemperature } = require('../core/ai-config');
       console.log(`  📚 "${topic}" 학습 중...\n  `);
       await streamChat({
         systemInstruction: 'You are a friendly Korean coding mentor. Explain the given topic with examples. Use 💡 for tips. Keep it under 20 lines.',
@@ -61,7 +61,7 @@ export async function runLearn(topic?: string): Promise<void> {
 
   // AI explanation for each problem team
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
 
     for (const team of problemTeams) {
       console.log(`  ─── ${team.name} (${team.score}/100) ───\n`);

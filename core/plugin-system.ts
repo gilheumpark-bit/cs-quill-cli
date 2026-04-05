@@ -182,8 +182,8 @@ export async function executeHooks(hookType: HookType, context: Record<string, u
 
     try {
       // VM 격리 실행 (process.env, child_process 접근 차단)
-      const { readFileSync: readFs } = await import('fs');
-      const vm = await import('vm');
+      const { readFileSync: readFs } = require('fs');
+      const vm = require('vm');
 
       const hookCode = readFs(hookPath, 'utf-8');
       const safeContext = vm.createContext({
@@ -218,7 +218,7 @@ export async function executeHooks(hookType: HookType, context: Record<string, u
 // ============================================================
 
 export async function searchPlugins(query: string): Promise<Array<{ name: string; description: string; version: string }>> {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync(`npm search cs-quill-plugin-${query} --json 2>/dev/null`, {

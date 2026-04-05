@@ -108,7 +108,7 @@ export async function resolveConflictWithAI(
     let resolved = '';
 
     // ai-config에서 설정된 provider 사용
-    const { getAIConfig } = await import('../core/ai-bridge');
+    const { getAIConfig } = require('../core/ai-bridge');
     const aiConfig = getAIConfig();
 
     if (aiConfig.provider === 'groq' || !aiConfig.apiKey) {

@@ -52,7 +52,7 @@ export async function runExplain(path: string): Promise<void> {
 
   // AI explanation
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
 
     process.stdout.write('  ');
     await streamChat({
@@ -66,7 +66,7 @@ export async function runExplain(path: string): Promise<void> {
 
     // Fallback: AST 기반 심층 분석 (ast-engine 연동)
     try {
-      const { analyzeWithTypeScript, analyzeWithTsMorph } = await import('../adapters/ast-engine');
+      const { analyzeWithTypeScript, analyzeWithTsMorph } = require('../adapters/ast-engine');
       const tsFindings = await analyzeWithTypeScript(code, path);
       const tsMorphFindings = await analyzeWithTsMorph(code, path);
 

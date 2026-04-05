@@ -87,7 +87,7 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
   };
 
   // Run audit engine
-  const { runProjectAudit, formatAuditReport } = await import('../core/pipeline-bridge');
+  const { runProjectAudit, formatAuditReport } = require('../core/pipeline-bridge');
 
   const report = runProjectAudit(ctx as never, (area, index, total) => {
     const bar = '█'.repeat(Math.round((index / total) * 20)) + '░'.repeat(20 - Math.round((index / total) * 20));
@@ -137,7 +137,7 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
 
   // Session recording
   try {
-    const { recordCommand, recordScore } = await import('../core/session');
+    const { recordCommand, recordScore } = require('../core/session');
     recordCommand('audit');
     recordScore('audit', report.totalScore);
   } catch { /* skip */ }

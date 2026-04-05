@@ -235,7 +235,7 @@ export async function runIpScan(path: string, opts: Record<string, unknown>): Pr
     console.log('     미확인 라이선스 → npm info <패키지명> license 로 확인');
   }
 
-  try { const { recordCommand } = await import('../core/session'); recordCommand('ip-scan'); } catch {}
+  try { const { recordCommand } = require('../core/session'); recordCommand('ip-scan'); } catch {}
 
   if (criticals.length > 0 || copyleftDeps.length > 0) {
     process.exitCode = 1;

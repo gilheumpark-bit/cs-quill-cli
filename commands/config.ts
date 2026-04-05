@@ -78,7 +78,7 @@ export async function runConfig(action: string): Promise<void> {
     }
 
     case 'keys-add': {
-      const { createInterface } = await import('readline');
+      const { createInterface } = require('readline');
       const rl = createInterface({ input: process.stdin, output: process.stdout });
       const prompt = (q: string, def?: string): Promise<string> => new Promise(r => {
         rl.question(`  ${q}${def ? ` [${def}]` : ''}: `, a => r(a.trim() || def || ''));
@@ -110,7 +110,7 @@ export async function runConfig(action: string): Promise<void> {
       for (const [i, k] of config.keys.entries()) {
         console.log(`  [${i + 1}] ${k.id} (${k.provider})`);
       }
-      const { createInterface: createRL } = await import('readline');
+      const { createInterface: createRL } = require('readline');
       const rl2 = createRL({ input: process.stdin, output: process.stdout });
       const idx = await new Promise<string>(r => rl2.question('  삭제할 번호: ', a => { rl2.close(); r(a.trim()); }));
       const num = parseInt(idx, 10) - 1;
@@ -162,7 +162,7 @@ export async function runConfig(action: string): Promise<void> {
     }
 
     case 'ai-profile': {
-      const { printAIProfileSummary } = await import('../core/ai-config');
+      const { printAIProfileSummary } = require('../core/ai-config');
       console.log(printAIProfileSummary());
       break;
     }
@@ -172,7 +172,7 @@ export async function runConfig(action: string): Promise<void> {
         console.log('  ⚠️  키가 없어 추천 불가. cs config keys-add 먼저.');
         break;
       }
-      const { recommendSecondKey, getSingleKeyStrategy } = await import('../core/ai-config');
+      const { recommendSecondKey, getSingleKeyStrategy } = require('../core/ai-config');
       const firstKey = config.keys[0];
       console.log(`\n  현재: ${firstKey.provider}/${firstKey.model}\n`);
 

@@ -48,7 +48,7 @@ export async function collectEvidence(code: string, fileName: string): Promise<E
 
   // 1. Static pipeline
   try {
-    const { runStaticPipeline } = await import('../core/pipeline-bridge');
+    const { runStaticPipeline } = require('../core/pipeline-bridge');
     const result = await runStaticPipeline(code, 'typescript');
     evidence.push({
       type: 'lint', source: '8-team-pipeline', score: result.score,
@@ -59,7 +59,7 @@ export async function collectEvidence(code: string, fileName: string): Promise<E
 
   // 2. Deep verify
   try {
-    const { runDeepVerify } = await import('./deep-verify');
+    const { runDeepVerify } = require('./deep-verify');
     const result = runDeepVerify(code, fileName);
     evidence.push({
       type: 'deep-verify', source: 'deep-verify-7checks', score: result.score,
@@ -70,7 +70,7 @@ export async function collectEvidence(code: string, fileName: string): Promise<E
 
   // 3. CFG analysis
   try {
-    const { runBrainAnalysis } = await import('./cfg-engine');
+    const { runBrainAnalysis } = require('./cfg-engine');
     const result = await runBrainAnalysis(code, fileName);
     evidence.push({
       type: 'ast', source: 'cfg-engine', score: Math.max(0, 100 - result.riskPaths.length * 15),
@@ -81,7 +81,7 @@ export async function collectEvidence(code: string, fileName: string): Promise<E
 
   // 4. Fuzz test (quick — 5 inputs only)
   try {
-    const { runInSandbox } = await import('../adapters/sandbox');
+    const { runInSandbox } = require('../adapters/sandbox');
     const quickInputs = ['null', 'undefined', '""', '0', '[]'];
     const funcMatch = code.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)/);
     const funcName = funcMatch?.[1];
@@ -121,8 +121,8 @@ export async function getAgentOpinion(
   evidence: Evidence[],
   agentRole: 'attacker' | 'defender' | 'judge',
 ): Promise<AgentOpinion | null> {
-  const { streamChat } = await import('./ai-bridge');
-  const { getTemperature } = await import('./ai-config');
+  const { streamChat } = require('./ai-bridge');
+  const { getTemperature } = require('./ai-config');
 
   const evidenceSummary = evidence.map(e =>
     `[${e.type}] ${e.source}: ${e.score}/100 — ${e.findings.slice(0, 5).join('; ')}`,
@@ -256,7 +256,7 @@ export async function runArena(
       // Apply suggested fixes via AI
       if (judge.suggestedFixes.length > 0) {
         try {
-          const { streamChat } = await import('./ai-bridge');
+          const { streamChat } = require('./ai-bridge');
           let fixedCode = '';
           await streamChat({
             systemInstruction: 'Apply the following fixes to the code. Output ONLY the fixed code.',

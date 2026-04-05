@@ -40,8 +40,8 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 1] AST 엔진...');
   const astStart = performance.now();
   // Lightweight: count files + functions as proxy
-  const { readdirSync, readFileSync, _statSync } = await import('fs');
-  const { join, _extname } = await import('path');
+  const { readdirSync, readFileSync, _statSync } = require('fs');
+  const { join, _extname } = require('path');
 
   let totalFiles = 0;
   let totalFunctions = 0;
@@ -72,7 +72,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 2] Quality 엔진...');
   const qualStart = performance.now();
   // Run pipeline on a sample of files
-  const { runStaticPipeline } = await import('../core/pipeline-bridge');
+  const { runStaticPipeline } = require('../core/pipeline-bridge');
   let qualScoreSum = 0;
   let qualCount = 0;
   function sampleVerify(dir: string, limit: number): void {
@@ -156,7 +156,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 5] Shield 엔진 (심층)...');
   const shieldDeepStart = performance.now();
   try {
-    const { runFullSecurityAnalysis } = await import('../adapters/security-engine');
+    const { runFullSecurityAnalysis } = require('../adapters/security-engine');
     const secResult = await runFullSecurityAnalysis(process.cwd());
     // Override shield score with deep analysis if available
     if (secResult.avgScore > 0) {
@@ -171,7 +171,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 6] Test 엔진...');
   const testStart = performance.now();
   try {
-    const { runFullTestAnalysis } = await import('../adapters/test-engine');
+    const { runFullTestAnalysis } = require('../adapters/test-engine');
     const testResult = await runFullTestAnalysis(process.cwd());
     categories.push({ name: 'Test', icon: '🧪', score: testResult.avgScore, engines: testResult.engines, duration: Math.round(performance.now() - testStart) });
     console.log(`        → ${testResult.avgScore}/100 (${testResult.engines} engines) ${categories[categories.length - 1].duration}ms`);
@@ -184,7 +184,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 7] Perf 엔진...');
   const perfStart = performance.now();
   try {
-    const { runFullPerfAnalysis } = await import('../adapters/perf-engine');
+    const { runFullPerfAnalysis } = require('../adapters/perf-engine');
     const perfResult = await runFullPerfAnalysis(process.cwd());
     categories.push({ name: 'Turbo', icon: '⚡', score: perfResult.avgScore, engines: perfResult.engines, duration: Math.round(performance.now() - perfStart) });
     console.log(`        → ${perfResult.avgScore}/100 ${categories[categories.length - 1].duration}ms`);
@@ -197,7 +197,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 8] Dep 엔진...');
   const depStart = performance.now();
   try {
-    const { runFullDepAnalysis } = await import('../adapters/dep-analyzer');
+    const { runFullDepAnalysis } = require('../adapters/dep-analyzer');
     const depResult = await runFullDepAnalysis(process.cwd());
     categories.push({ name: 'Deps', icon: '📦', score: depResult.avgScore, engines: depResult.engines, duration: Math.round(performance.now() - depStart) });
     console.log(`        → ${depResult.avgScore}/100 (${depResult.engines} engines) ${categories[categories.length - 1].duration}ms`);
@@ -210,7 +210,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  [Phase 9] Web 엔진...');
   const webStart = performance.now();
   try {
-    const { runFullWebQualityAnalysis } = await import('../adapters/web-quality');
+    const { runFullWebQualityAnalysis } = require('../adapters/web-quality');
     const webResult = await runFullWebQualityAnalysis(process.cwd());
     categories.push({ name: 'Web', icon: '🌐', score: webResult.avgScore, engines: webResult.engines, duration: Math.round(performance.now() - webStart) });
     console.log(`        → ${webResult.avgScore}/100 (${webResult.engines} engines) ${categories[categories.length - 1].duration}ms`);
@@ -240,19 +240,19 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   console.log('  └─────────────────────────────────────┘');
 
   // Quill mood
-  const { getQuillMood } = await import('./fun');
+  const { getQuillMood } = require('./fun');
   console.log(getQuillMood(weightedScore));
 
   // Session recording
   try {
-    const { recordCommand, recordScore } = await import('../core/session');
+    const { recordCommand, recordScore } = require('../core/session');
     recordCommand('playground');
     recordScore('playground', weightedScore);
   } catch { /* skip */ }
 
   // --challenge: show challenges
   if (opts.challenge) {
-    const { evaluateChallenges } = await import('../core/badges');
+    const { evaluateChallenges } = require('../core/badges');
     const challenges = evaluateChallenges();
     console.log('  🎮 챌린지:\n');
     for (const c of challenges) {
@@ -265,7 +265,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
 
   // --share: generate share card
   if (opts.share) {
-    const { generateShareCard, generateReadmeBadge, evaluateBadges } = await import('../core/badges');
+    const { generateShareCard, generateReadmeBadge, evaluateBadges } = require('../core/badges');
     const { allEarned } = evaluateBadges();
     const badgeIcons = BADGES_LIST.filter(b => allEarned.includes(b.id)).map(b => b.icon);
     const projectName = process.cwd().split('/').pop() ?? 'project';
@@ -275,7 +275,7 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   }
 
   // Check for new badges
-  const { evaluateBadges: evalBadges } = await import('../core/badges');
+  const { evaluateBadges: evalBadges } = require('../core/badges');
   const { newBadges } = evalBadges();
   if (newBadges.length > 0) {
     console.log('  🏆 새 뱃지 획득!');

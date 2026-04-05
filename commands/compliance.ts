@@ -77,14 +77,14 @@ export async function runCompliance(_opts: ComplianceOptions): Promise<void> {
   let depPassed = hasPkgLock;
 
   try {
-    const { runNpmAudit } = await import('../core/pipeline-bridge');
+    const { runNpmAudit } = require('../core/pipeline-bridge');
     const audit = await runNpmAudit(process.cwd());
     if (audit.critical > 0) { depPassed = false; depDetail += ` | critical ${audit.critical}건`; }
     else depDetail += ` | 취약점 없음`;
   } catch { depDetail += ' | audit 스킵'; }
 
   try {
-    const { runRetireJS } = await import('../adapters/security-engine');
+    const { runRetireJS } = require('../adapters/security-engine');
     const retire = await runRetireJS(process.cwd());
     if (retire.vulnerableCount > 0) { depPassed = false; depDetail += ` | retire ${retire.vulnerableCount}건`; }
   } catch { /* retire optional */ }
@@ -107,7 +107,7 @@ export async function runCompliance(_opts: ComplianceOptions): Promise<void> {
   let codeQualityPassed = true;
   let codeQualityDetail = 'no src files';
   try {
-    const { runStaticPipeline } = await import('../core/pipeline-bridge');
+    const { runStaticPipeline } = require('../core/pipeline-bridge');
     const srcDir = join(process.cwd(), 'src');
     if (existsSync(srcDir)) {
       const sampleFiles = readdirSync(srcDir).filter(f => f.endsWith('.ts') || f.endsWith('.tsx')).slice(0, 5);

@@ -97,13 +97,13 @@ export async function runReport(opts: ReportOptions): Promise<void> {
 
   // Cost tracking
   try {
-    const { formatCostSummary } = await import('../core/cost-tracker');
+    const { formatCostSummary } = require('../core/cost-tracker');
     console.log(`\n${formatCostSummary()}`);
   } catch {}
 
   // Fix Memory stats
   try {
-    const { getStats } = await import('../core/fix-memory');
+    const { getStats } = require('../core/fix-memory');
     const fixStats = getStats();
     if (fixStats.total > 0) {
       console.log(`\n  🧠 Fix Memory:`);
@@ -116,7 +116,7 @@ export async function runReport(opts: ReportOptions): Promise<void> {
 
   // Badge check
   try {
-    const { evaluateBadges } = await import('../core/badges');
+    const { evaluateBadges } = require('../core/badges');
     const { newBadges, allEarned } = evaluateBadges();
     if (allEarned.length > 0) {
       console.log(`\n  🏆 뱃지: ${allEarned.length}개 획득`);

@@ -61,7 +61,7 @@ export async function buildCFG(code: string, fileName: string): Promise<CFGGraph
 
 // ── AST 기반 CFG (TypeScript Compiler API) ──
 async function buildCFGWithAST(code: string, fileName: string): Promise<CFGGraph> {
-  const ts = await import('typescript');
+  const ts = require('typescript');
   nodeCounter = 0;
   const nodes = new Map<string, CFGNode>();
   const exits: string[] = [];

@@ -9,7 +9,7 @@
 // ============================================================
 
 export async function runDepcheck(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx depcheck --json 2>/dev/null', {
@@ -36,7 +36,7 @@ export async function runDepcheck(rootPath: string) {
 // ============================================================
 
 export async function runKnip(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx knip --reporter json 2>/dev/null', {
@@ -73,7 +73,7 @@ export async function runKnip(rootPath: string) {
 // ============================================================
 
 export async function runDependencyCruiser(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync(
@@ -112,7 +112,7 @@ export async function runDependencyCruiser(rootPath: string) {
 // ============================================================
 
 export async function runPublint(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx publint --json 2>/dev/null', {
@@ -143,7 +143,7 @@ export async function runPublint(rootPath: string) {
 // ============================================================
 
 export async function runAttw(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx attw --pack --json 2>/dev/null', {
@@ -171,7 +171,7 @@ export async function runAttw(rootPath: string) {
 // ============================================================
 
 export async function runOxlint(rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx oxlint --format json src/ 2>/dev/null', {
@@ -214,8 +214,8 @@ export async function runOxlint(rootPath: string) {
 // ============================================================
 
 export async function detectCodemodOpportunities(rootPath: string) {
-  const { readFileSync, existsSync } = await import('fs');
-  const { join } = await import('path');
+  const { readFileSync, existsSync } = require('fs');
+  const { join } = require('path');
 
   const opportunities: Array<{ from: string; to: string; description: string; command: string }> = [];
 

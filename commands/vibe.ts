@@ -41,7 +41,7 @@ export async function runVibe(prompt: string): Promise<void> {
 
   let specRaw = '';
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
     await streamChat({
       systemInstruction: VIBE_SPEC_PROMPT,
       messages: [{ role: 'user', content: prompt }],
@@ -79,7 +79,7 @@ export async function runVibe(prompt: string): Promise<void> {
   console.log(`  📁 약 ${spec.estimatedFiles}개 파일\n`);
 
   // Confirmation (대화형)
-  const { createInterface } = await import('readline');
+  const { createInterface } = require('readline');
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   let answer = '';
   try {

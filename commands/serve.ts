@@ -12,48 +12,48 @@ import { readFileSync } from 'fs';
 
 async function handleVerify(body: string): Promise<object> {
   const { code, language } = JSON.parse(body);
-  const { runStaticPipeline } = await import('../core/pipeline-bridge');
+  const { runStaticPipeline } = require('../core/pipeline-bridge');
   return await runStaticPipeline(code ?? '', language ?? 'typescript');
 }
 
 async function handleHollow(body: string): Promise<object> {
   const { code, fileName } = JSON.parse(body);
-  const { scanForHollowCode } = await import('../core/pipeline-bridge');
+  const { scanForHollowCode } = require('../core/pipeline-bridge');
   return { findings: scanForHollowCode(code ?? '', fileName ?? 'unknown') };
 }
 
 async function handleDeadCode(body: string): Promise<object> {
   const { code, language } = JSON.parse(body);
-  const { scanDeadCode } = await import('../core/pipeline-bridge');
+  const { scanDeadCode } = require('../core/pipeline-bridge');
   return { findings: scanDeadCode(code ?? '', language ?? 'typescript') };
 }
 
 async function handleDesignLint(body: string): Promise<object> {
   const { code } = JSON.parse(body);
-  const { runDesignLint } = await import('../core/pipeline-bridge');
+  const { runDesignLint } = require('../core/pipeline-bridge');
   return runDesignLint(code ?? '');
 }
 
 async function handleCognitiveLoad(body: string): Promise<object> {
   const { code } = JSON.parse(body);
-  const { analyzeCognitiveLoad } = await import('../core/pipeline-bridge');
+  const { analyzeCognitiveLoad } = require('../core/pipeline-bridge');
   return analyzeCognitiveLoad(code ?? '');
 }
 
 async function handleBugfinder(body: string): Promise<object> {
   const { code } = JSON.parse(body);
-  const { findBugsStatic } = await import('../core/pipeline-bridge');
+  const { findBugsStatic } = require('../core/pipeline-bridge');
   return { bugs: findBugsStatic(code ?? '') };
 }
 
 async function handleIPScan(body: string): Promise<object> {
   const { files } = JSON.parse(body);
-  const { scanProject } = await import('../core/pipeline-bridge');
+  const { scanProject } = require('../core/pipeline-bridge');
   return scanProject(files ?? []);
 }
 
 async function handleHealth(): Promise<object> {
-  const { loadMergedConfig } = await import('../core/config');
+  const { loadMergedConfig } = require('../core/config');
   const config = loadMergedConfig();
   return {
     status: 'ok',

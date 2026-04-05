@@ -54,7 +54,7 @@ const P0_CHECKS: CheckItem[] = [
   {
     id: 'P0-05', category: 'reference', severity: 'P0',
     question: 'dynamic import의 모듈 경로가 실제 존재하는 파일인가?',
-    lookFor: "await import('../commands/undo') ← undo.ts 파일 실제 존재?",
+    lookFor: "require('../commands/undo') ← undo.ts 파일 실제 존재?",
     example: 'runUndo는 apply.ts에 있는데 undo.ts에서 import 시도',
   },
   {
@@ -431,8 +431,8 @@ export async function runPrecisionReview(
   const prompt = buildPrecisionReviewPrompt(code, fileName, mode);
 
   try {
-    const { streamChat } = await import('../core/ai-bridge');
-    const { getTemperature } = await import('../core/ai-config');
+    const { streamChat } = require('../core/ai-bridge');
+    const { getTemperature } = require('../core/ai-config');
 
     let raw = '';
     await streamChat({

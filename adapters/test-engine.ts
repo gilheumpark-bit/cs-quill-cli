@@ -20,7 +20,7 @@ export interface VitestResult {
 export async function runVitest(rootPath: string): Promise<VitestResult> {
   try {
     // 1차: vitest programmatic API
-    const { startVitest } = await import('vitest/node');
+    const { startVitest } = require('vitest/node');
 
     const vitest = await startVitest('test', [], {
       root: rootPath,
@@ -67,7 +67,7 @@ export async function runVitest(rootPath: string): Promise<VitestResult> {
 
   // 2차: CLI fallback (JSON output)
   try {
-    const { execSync } = await import('child_process');
+    const { execSync } = require('child_process');
     const output = execSync('npx vitest run --reporter=json 2>/dev/null', {
       cwd: rootPath, encoding: 'utf-8', timeout: 120000,
     });
@@ -91,7 +91,7 @@ export async function runVitest(rootPath: string): Promise<VitestResult> {
   } catch {
     // 3차: jest fallback
     try {
-      const { execSync } = await import('child_process');
+      const { execSync } = require('child_process');
       const output = execSync('npx jest --json 2>/dev/null', {
         cwd: rootPath, encoding: 'utf-8', timeout: 120000,
       });
@@ -136,7 +136,7 @@ export interface PropertySpec {
 }
 
 export async function runPropertyTests(specs: PropertySpec[]): Promise<PBTResult> {
-  const fc = await import('fast-check');
+  const fc = require('fast-check');
   const results: PBTResult['properties'] = [];
 
   function resolveArbitrary(desc: string): fc.Arbitrary<unknown> {
@@ -215,7 +215,7 @@ export async function autoFuzzFunction(
   paramTypes: string[] = ['string'],
   numRuns: number = 100,
 ): Promise<PBTResult> {
-  const { runInVM } = await import('./sandbox');
+  const { runInVM } = require('./sandbox');
 
   return runPropertyTests([
     {
@@ -259,7 +259,7 @@ export interface MutationResult {
 }
 
 export async function runStryker(rootPath: string): Promise<MutationResult> {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync('npx stryker run --reporters json 2>/dev/null', {

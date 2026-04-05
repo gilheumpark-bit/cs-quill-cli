@@ -117,13 +117,13 @@ function deduplicateImports(code: string): string {
 // ============================================================
 
 export async function runGenerate(prompt: string, opts: GenerateOptions): Promise<void> {
-  const { printHeader, colors, icons } = await import('../core/terminal-compat');
-  const { Spinner } = await import('../tui/progress');
+  const { printHeader, colors, icons } = require('../core/terminal-compat');
+  const { Spinner } = require('../tui/progress');
   printHeader('코드 생성');
   console.log('');
 
   // ── Pre-check: Patent DB ──
-  const { checkPatentPatterns } = await import('../core/patent-db');
+  const { checkPatentPatterns } = require('../core/patent-db');
   const patentCheck = checkPatentPatterns(prompt);
   if (!patentCheck.safe) {
     console.log('  🚫 특허/보안 위험 감지:');
@@ -142,11 +142,11 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   }
 
   // ── Pre-check: Yolo mode git stash ──
-  const { loadMergedConfig } = await import('../core/config');
+  const { loadMergedConfig } = require('../core/config');
   const csConfig = loadMergedConfig();
   if (csConfig.fileMode === 'yolo') {
     try {
-      const { execSync } = await import('child_process');
+      const { execSync } = require('child_process');
       execSync('git stash push -m "cs-quill-yolo-backup"', { stdio: 'pipe' });
       console.log('  ⚡ Yolo 모드 — git stash 자동 백업 완료\n');
     } catch { /* no git or nothing to stash */ }
@@ -160,9 +160,9 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   console.log('  [1/6] 📐 계획 수립 (SEAL 계약 생성)...');
 
   // Inject patent directive + style + presets + references into context
-  const { loadProfile, buildStyleDirective } = await import('../core/style-learning');
-  const { getPresetsForFramework, buildPresetDirective } = await import('./preset');
-  const { searchPatterns, buildReferencePrompt, recordUsage } = await import('../core/reference-db');
+  const { loadProfile, buildStyleDirective } = require('../core/style-learning');
+  const { getPresetsForFramework, buildPresetDirective } = require('./preset');
+  const { searchPatterns, buildReferencePrompt, recordUsage } = require('../core/reference-db');
 
   const projectId = process.cwd().split('/').pop() ?? 'unknown';
   const styleProfile = loadProfile(projectId);
@@ -172,9 +172,9 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // Reference search — 유사 패턴 찾아서 주입 (외부 레퍼런스 자동 로드 포함)
   try {
-    const { loadExternalReferences } = await import('../core/reference-db');
+    const { loadExternalReferences } = require('../core/reference-db');
     const refPath = join(process.cwd(), '..', 'new1');
-    const { existsSync: refExists } = await import('fs');
+    const { existsSync: refExists } = require('fs');
     // 프로젝트 상위 또는 직박구리 내 new1 폴더 탐색
     const candidates = [refPath, join(process.cwd(), 'new1'), join(process.cwd(), '..', '..', 'new1')];
     for (const p of candidates) {
@@ -195,8 +195,8 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   const planPrompt = buildPlannerPrompt(prompt, extraContext || undefined);
 
   // Dynamic import to avoid loading AI at startup
-  const { streamChat } = await import('../core/ai-bridge');
-  const { getTemperature } = await import('../core/ai-config');
+  const { streamChat } = require('../core/ai-bridge');
+  const { getTemperature } = require('../core/ai-config');
 
   let planRaw = '';
   await streamChat({
@@ -314,7 +314,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   let pipelineResult: { teams: Array<{ name: string; score: number; findings: Array<string | { message: string }> }>; overallScore: number; overallStatus: string };
   try {
-    const { runEnhancedPipeline } = await import('../core/ast-bridge');
+    const { runEnhancedPipeline } = require('../core/ast-bridge');
     const enhanced = await runEnhancedPipeline(mergedCode, 'typescript', fileName);
     console.log(`        엔진: ${enhanced.engines.join(', ')}`);
 
@@ -337,7 +337,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
     };
   } catch {
     // Fallback to regex-only
-    const { runStaticPipeline } = await import('../core/pipeline-bridge');
+    const { runStaticPipeline } = require('../core/pipeline-bridge');
     pipelineResult = await runStaticPipeline(mergedCode, 'typescript');
   }
 
@@ -351,7 +351,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   if (opts.mode !== 'fast' && csConfig.keys.length >= 2) {
     console.log('\n  [4.5/6] 🔍 크로스모델 검증...');
     try {
-      const { CROSS_JUDGE_SYSTEM_PROMPT, buildJudgePrompt, parseJudgeResult } = await import('../ai/cross-judge');
+      const { CROSS_JUDGE_SYSTEM_PROMPT, buildJudgePrompt, parseJudgeResult } = require('../ai/cross-judge');
 
       const judgeFindings = pipelineResult.teams.flatMap((s) => {
         const findings = Array.isArray(s.findings) ? s.findings : [];
@@ -393,7 +393,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   if (pipelineResult.overallStatus !== 'pass' && opts.mode !== 'fast') {
     console.log('\n  [5/6] 🔧 자동수정 루프...');
 
-    const { runVerificationLoop } = await import('../core/pipeline-bridge');
+    const { runVerificationLoop } = require('../core/pipeline-bridge');
 
     try {
       const maxRounds = opts.mode === 'strict' ? 3 : 2;
@@ -459,7 +459,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // Deprecation check
   try {
-    const { checkDeprecations, formatDeprecationReport } = await import('../core/deprecation-checker');
+    const { checkDeprecations, formatDeprecationReport } = require('../core/deprecation-checker');
     const deprecations = checkDeprecations(finalCode, fileName, process.cwd());
     if (deprecations.length > 0) {
       console.log('\n' + formatDeprecationReport(deprecations));
@@ -468,7 +468,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // Record to Fix Memory
   try {
-    const { recordFix } = await import('../core/fix-memory');
+    const { recordFix } = require('../core/fix-memory');
     for (const stage of pipelineResult.teams) {
       for (const finding of stage.findings) {
         recordFix({
@@ -503,7 +503,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // Git commit with AI message
   if (opts.commit) {
-    const { execSync } = await import('child_process');
+    const { execSync } = require('child_process');
     try {
       let commitMsg = `feat(cs): ${prompt.slice(0, 50)}`;
       try {
@@ -526,7 +526,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // --pr: create PR (requires gh CLI)
   if (opts.pr) {
-    const { execSync } = await import('child_process');
+    const { execSync } = require('child_process');
     try {
       const branchName = `cs/${prompt.replace(/[^a-zA-Z0-9]/g, '-').slice(0, 30)}`;
       execSync(`git checkout -b "${branchName}" 2>/dev/null || true`, { stdio: 'pipe' });
@@ -541,7 +541,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
   // Badge auto-trigger
   try {
-    const { evaluateBadges } = await import('../core/badges');
+    const { evaluateBadges } = require('../core/badges');
     const { newBadges } = evaluateBadges();
     if (newBadges.length > 0) {
       for (const b of newBadges) console.log(`  🏆 ${b.icon} ${b.name} 획득! — ${b.description}`);

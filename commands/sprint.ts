@@ -67,7 +67,7 @@ export async function runSprint(tasksInput: string): Promise<void> {
     for (const f of failed) console.log(`     - ${f.task}`);
   }
   console.log('');
-  try { const { recordCommand } = await import('../core/session'); recordCommand(`sprint ${tasks.length}`); } catch {}
+  try { const { recordCommand } = require('../core/session'); recordCommand(`sprint ${tasks.length}`); } catch {}
 }
 
 // IDENTITY_SEAL: PART-2 | role=sprint-runner | inputs=tasksInput | outputs=console

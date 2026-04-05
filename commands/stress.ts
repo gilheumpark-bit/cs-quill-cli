@@ -132,7 +132,7 @@ export async function runStress(path: string, opts: StressOptions): Promise<void
   if (targetUrl) {
     console.log(`\n  [Phase 2] 🔥 실측 부하 테스트 (autocannon → ${targetUrl})...`);
     try {
-      const { runAutocannon } = await import('../adapters/perf-engine');
+      const { runAutocannon } = require('../adapters/perf-engine');
       const result = await runAutocannon(targetUrl, {
         connections: parseInt(opts.users, 10) || 10,
         duration: parseInt(opts.duration, 10) || 10,
@@ -149,7 +149,7 @@ export async function runStress(path: string, opts: StressOptions): Promise<void
     console.log('\n  [Phase 2] AI 가상 시뮬레이션... (--url <endpoint>로 실측 가능)');
 
   try {
-    const { analyzeStress, getScenarios } = await import('../core/pipeline-bridge');
+    const { analyzeStress, getScenarios } = require('../core/pipeline-bridge');
     const scenarios = getScenarios();
     const targetScenario = opts.scenario
       ? scenarios.find(s => s.id.includes(opts.scenario!) || s.type === opts.scenario)
@@ -196,7 +196,7 @@ export async function runStress(path: string, opts: StressOptions): Promise<void
     if (metrics.recursiveFunctionCount > 0) console.log('     → 재귀에 depth limit 추가');
   }
 
-  try { const { recordCommand } = await import('../core/session'); recordCommand(`stress ${path}`); } catch {}
+  try { const { recordCommand } = require('../core/session'); recordCommand(`stress ${path}`); } catch {}
   console.log(`\n  완료: ${duration}ms\n`);
 }
 

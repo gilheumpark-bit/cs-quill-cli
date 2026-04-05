@@ -59,25 +59,25 @@ registerTaskHandler('eval', async (payload) => {
 
 registerTaskHandler('lint-file', async (payload) => {
   const { filePath } = payload as { filePath: string };
-  const { runESLint } = await import('./lint-engine');
+  const { runESLint } = require('./lint-engine');
   return runESLint(filePath);
 });
 
 registerTaskHandler('security-scan', async (payload) => {
   const { rootPath } = payload as { rootPath: string };
-  const { runNpmAudit } = await import('./security-engine');
+  const { runNpmAudit } = require('./security-engine');
   return runNpmAudit(rootPath);
 });
 
 registerTaskHandler('dep-check', async (payload) => {
   const { rootPath } = payload as { rootPath: string };
-  const { runDepcheck } = await import('./dep-analyzer');
+  const { runDepcheck } = require('./dep-analyzer');
   return runDepcheck(rootPath);
 });
 
 registerTaskHandler('accessibility', async (payload) => {
   const { html } = payload as { html: string };
-  const { runAxeAccessibility } = await import('./web-quality');
+  const { runAxeAccessibility } = require('./web-quality');
   return runAxeAccessibility(html);
 });
 

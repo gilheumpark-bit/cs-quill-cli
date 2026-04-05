@@ -102,8 +102,8 @@ export async function runBench(path: string, opts: BenchOptions): Promise<void> 
 
   // 런타임 벤치마크 (tinybench 연동)
   try {
-    const { runTinybench } = await import('../adapters/perf-engine');
-    const { runInVM } = await import('../adapters/sandbox');
+    const { runTinybench } = require('../adapters/perf-engine');
+    const { runInVM } = require('../adapters/sandbox');
 
     // 순수 함수만 벤치마크 (side-effect 없는 것)
     const benchable = scored.filter(fn => !fn.isAsync && fn.length < 30);
@@ -150,7 +150,7 @@ export async function runBench(path: string, opts: BenchOptions): Promise<void> 
   }
   console.log('');
 
-  try { const { recordCommand } = await import('../core/session'); recordCommand(`bench ${path}`); } catch {}
+  try { const { recordCommand } = require('../core/session'); recordCommand(`bench ${path}`); } catch {}
 
   const result: BenchResult = { functions: scored, timestamp: Date.now() };
 

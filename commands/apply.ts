@@ -20,7 +20,7 @@ export async function runApply(file: string | undefined, opts: ApplyOptions): Pr
 
   // Check file mode
   try {
-    const { loadMergedConfig } = await import('../core/config');
+    const { loadMergedConfig } = require('../core/config');
     const config = loadMergedConfig();
     if (config.fileMode === 'yolo' && !opts.all) {
       opts.all = true; // Yolo = auto apply all
@@ -58,10 +58,10 @@ export async function runApply(file: string | undefined, opts: ApplyOptions): Pr
     // Show diff before applying (safe/auto mode)
     if (existsSync(targetPath)) {
       try {
-        const { loadMergedConfig } = await import('../core/config');
+        const { loadMergedConfig } = require('../core/config');
         const cfg = loadMergedConfig();
         if (cfg.fileMode !== 'yolo') {
-          const { computeDiff, formatDiff, printDiffSummary } = await import('../tui/diff-preview');
+          const { computeDiff, formatDiff, printDiffSummary } = require('../tui/diff-preview');
           const original = readFileSync(targetPath, 'utf-8');
           const modified = readFileSync(generatedPath, 'utf-8');
           const diff = computeDiff(original, modified);

@@ -166,7 +166,7 @@ async function streamLMStudio(config: LocalModelConfig, opts: StreamOptions): Pr
 export async function streamWithFallback(opts: StreamOptions): Promise<{ usedLocal: boolean }> {
   // Try remote first
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
     await streamChat({
       systemInstruction: opts.systemInstruction,
       messages: opts.messages.map(m => ({ role: m.role as 'user' | 'assistant', content: m.content })),

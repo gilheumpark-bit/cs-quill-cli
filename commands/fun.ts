@@ -46,7 +46,7 @@ export async function generateCodePoem(topic: string): Promise<void> {
   console.log('🦔 CS Quill — 코드 포엠 ✨\n');
 
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
 
     process.stdout.write('  ');
     await streamChat({
@@ -169,7 +169,7 @@ export async function generateCodeArt(subject: string): Promise<void> {
   console.log('🦔 CS Quill — 코드 아트 🎨\n');
 
   try {
-    const { streamChat } = await import('../core/ai-bridge');
+    const { streamChat } = require('../core/ai-bridge');
 
     process.stdout.write('  ');
     await streamChat({
@@ -227,7 +227,7 @@ export async function createApp(description: string): Promise<void> {
   console.log(`  "${description}" 만드는 중...\n`);
 
   try {
-    const { generateApp } = await import('../core/pipeline-bridge');
+    const { generateApp } = require('../core/pipeline-bridge');
 
     const result = await generateApp(description, (status: string) => {
       console.log(`  ⏳ ${status}`);
@@ -239,14 +239,14 @@ export async function createApp(description: string): Promise<void> {
     }
 
     // Save to .cs/created/
-    const { mkdirSync, writeFileSync } = await import('fs');
-    const { join } = await import('path');
+    const { mkdirSync, writeFileSync } = require('fs');
+    const { join } = require('path');
     const createdDir = join(process.cwd(), '.cs', 'created', description.replace(/[^a-zA-Z0-9가-힣]/g, '-').slice(0, 30));
     mkdirSync(createdDir, { recursive: true });
 
     for (const file of result.files) {
       const filePath = join(createdDir, file.path);
-      const { dirname } = await import('path');
+      const { dirname } = require('path');
       const fileDir = dirname(filePath);
       if (fileDir && fileDir !== '.') mkdirSync(fileDir, { recursive: true });
       writeFileSync(filePath, file.content, 'utf-8');

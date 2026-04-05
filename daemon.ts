@@ -327,7 +327,7 @@ async function _handleMessageInner(
 
       try {
         // pipeline-bridge의 8팀 파이프라인 호출
-        const { runStaticPipeline } = await import('./core/pipeline-bridge');
+        const { runStaticPipeline } = require('./core/pipeline-bridge');
         const result = await analyzeWithTimeout(() => runStaticPipeline(content, language ?? 'typescript'));
 
         // Step 9: finding을 VS Code Diagnostic 호환 포맷으로 변환
@@ -335,7 +335,7 @@ async function _handleMessageInner(
 
         // deep-verify 추가
         try {
-          const { runDeepVerify } = await import('./core/deep-verify');
+          const { runDeepVerify } = require('./core/deep-verify');
           const deep = await runDeepVerify(content, filePath);
           for (const f of deep.findings) {
             findings.push({
@@ -378,7 +378,7 @@ async function _handleMessageInner(
       const batchResults: AnalysisResult[] = [];
       for (let i = 0; i < files.length; i++) {
         try {
-          const { runStaticPipeline } = await import('./core/pipeline-bridge');
+          const { runStaticPipeline } = require('./core/pipeline-bridge');
           const start = performance.now();
           const result = await runStaticPipeline(files[i].content, files[i].language ?? 'typescript');
           const findings = result.teams.flatMap(t => t.findings.map((f: any) => ({
@@ -402,7 +402,7 @@ async function _handleMessageInner(
       // Step 10: 특정 finding에 대한 수리 코드 요청
       const { filePath, content, findingIndex, findingMessage } = msg.payload as { filePath: string; content: string; findingIndex?: number; findingMessage?: string };
       try {
-        const { streamChat } = await import('./core/ai-bridge');
+        const { streamChat } = require('./core/ai-bridge');
         let fixCode = '';
         await streamChat({
           systemInstruction: 'You are a code fixer. Fix ONLY the specific issue. Output ONLY the fixed code snippet (not full file). No explanation.',
@@ -422,7 +422,7 @@ async function _handleMessageInner(
       // 코드 해설 요청 (VS Code 호버 확장용)
       const { content: codeSnippet, line: codeLine } = msg.payload as { content: string; line?: number };
       try {
-        const { streamChat } = await import('./core/ai-bridge');
+        const { streamChat } = require('./core/ai-bridge');
         let explanation = '';
         await streamChat({
           systemInstruction: 'Explain this code briefly in Korean. 2-3 sentences max.',
@@ -440,7 +440,7 @@ async function _handleMessageInner(
     case 'get_config': {
       // 설정 조회
       try {
-        const { loadMergedConfig } = await import('./core/config');
+        const { loadMergedConfig } = require('./core/config');
         const config = loadMergedConfig();
         sendWS(session.socket, { type: 'config', id: requestId, payload: { ...config, keys: config.keys?.map((k: any) => ({ ...k, key: '***' })) } });
       } catch (e) {
@@ -453,12 +453,12 @@ async function _handleMessageInner(
       // Step 8: 파일 워치 구독 (데몬이 파일 변경 감지 → 자동 분석)
       const { filePath: watchPath } = msg.payload as { filePath: string };
       try {
-        const { watch } = await import('fs');
+        const { watch } = require('fs');
         const watcher = watch(watchPath, { persistent: false }, async () => {
           try {
-            const { readFileSync } = await import('fs');
+            const { readFileSync } = require('fs');
             const content = readFileSync(watchPath, 'utf-8');
-            const { runStaticPipeline } = await import('./core/pipeline-bridge');
+            const { runStaticPipeline } = require('./core/pipeline-bridge');
             const start = performance.now();
             const result = await runStaticPipeline(content, 'typescript');
             const findings = result.teams.flatMap(t => t.findings.map((f: any) => ({
@@ -552,7 +552,7 @@ export function startDaemon(config: Partial<DaemonConfig> = {}): { stop: () => v
       req.on('end', async () => {
         try {
           const { filePath, content, language } = JSON.parse(body || '{}');
-          const { runStaticPipeline } = await import('./core/pipeline-bridge');
+          const { runStaticPipeline } = require('./core/pipeline-bridge');
           const result = await runStaticPipeline(content ?? '', language ?? 'typescript');
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ filePath, score: result.score, teams: result.teams.length, findings: result.teams.flatMap(t => t.findings).length }));

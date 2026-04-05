@@ -90,7 +90,7 @@ function parseTscOutput(output: string, rootPath: string): LSPDiagnostic[] {
 
 export async function getTypeInfo(filePath: string, line: number, column: number): Promise<LSPTypeInfo | null> {
   try {
-    const ts = await import('typescript');
+    const ts = require('typescript');
     const content = readFileSync(filePath, 'utf-8');
 
     const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);

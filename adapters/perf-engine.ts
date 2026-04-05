@@ -9,7 +9,7 @@
 // ============================================================
 
 export async function runAutocannon(url: string, opts?: { connections?: number; duration?: number }) {
-  const autocannon = (await import('autocannon')).default;
+  const autocannon = (require('autocannon')).default;
 
   return new Promise<{
     rps: number; latencyAvg: number; latencyP50: number; latencyP95: number; latencyP99: number;
@@ -45,7 +45,7 @@ export async function runAutocannon(url: string, opts?: { connections?: number; 
 // ============================================================
 
 export async function runTinybench(benchmarks: Array<{ name: string; fn: () => void | Promise<void> }>) {
-  const { Bench } = await import('tinybench');
+  const { Bench } = require('tinybench');
 
   const bench = new Bench({ time: 1000 });
 
@@ -72,15 +72,15 @@ export async function runTinybench(benchmarks: Array<{ name: string; fn: () => v
 // ============================================================
 
 export async function runC8(command: string, rootPath: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
   try {
     const _output = execSync(`npx c8 --reporter=json-summary ${command} 2>/dev/null`, {
       cwd: rootPath, encoding: 'utf-8', timeout: 60000,
     });
 
     // Parse summary from coverage/coverage-summary.json
-    const { readFileSync, existsSync } = await import('fs');
-    const { join } = await import('path');
+    const { readFileSync, existsSync } = require('fs');
+    const { join } = require('path');
     const summaryPath = join(rootPath, 'coverage', 'coverage-summary.json');
 
     if (existsSync(summaryPath)) {

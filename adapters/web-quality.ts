@@ -13,10 +13,10 @@ export async function runAxeAccessibility(htmlContent: string) {
   const findings: Array<{ line: number; message: string; severity: string; impact: string }> = [];
 
   try {
-    const axe = await import('axe-core');
+    const axe = require('axe-core');
 
     // axe-core는 DOM 기반이라 JSDOM으로 실행
-    const { JSDOM } = await import('jsdom');
+    const { JSDOM } = require('jsdom');
     const dom = new JSDOM(htmlContent);
     const document = dom.window.document;
 
@@ -56,8 +56,8 @@ export async function runAxeAccessibility(htmlContent: string) {
 // ============================================================
 
 export async function checkBundleSize(rootPath: string) {
-  const { readFileSync, existsSync } = await import('fs');
-  const { join } = await import('path');
+  const { readFileSync, existsSync } = require('fs');
+  const { join } = require('path');
   const findings: Array<{ name: string; size: string; severity: string }> = [];
 
   const pkgPath = join(rootPath, 'package.json');
@@ -117,7 +117,7 @@ export async function checkBundleSize(rootPath: string) {
 // ============================================================
 
 export async function runLighthouse(url: string) {
-  const { execSync } = await import('child_process');
+  const { execSync } = require('child_process');
 
   try {
     const output = execSync(

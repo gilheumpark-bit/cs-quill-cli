@@ -144,7 +144,7 @@ export async function getDebugTargets(inspectorUrl: string): Promise<Array<{ id:
 // ============================================================
 
 export async function quickInspect(code: string, expression: string): Promise<string> {
-  const { runInVM } = await import('./sandbox');
+  const { runInVM } = require('./sandbox');
 
   const inspectCode = `
 ${code}
@@ -181,16 +181,16 @@ export async function profileRun(
   durationSec: number = 5,
 ): Promise<{ cpuProfilePath?: string; heapSnapshotPath?: string; duration: number }> {
   const startTime = performance.now();
-  const { join } = await import('path');
-  const { tmpdir } = await import('os');
-  const { existsSync, readdirSync } = await import('fs');
+  const { join } = require('path');
+  const { tmpdir } = require('os');
+  const { existsSync, readdirSync } = require('fs');
 
   const outDir = join(tmpdir(), `cs-profile-${Date.now()}`);
-  const { mkdirSync } = await import('fs');
+  const { mkdirSync } = require('fs');
   mkdirSync(outDir, { recursive: true });
 
   try {
-    const { execSync } = await import('child_process');
+    const { execSync } = require('child_process');
 
     // CPU profile: Node.js 내장 --cpu-prof
     execSync(
@@ -218,15 +218,15 @@ export async function profileRun(
 // ============================================================
 
 export async function takeHeapSnapshot(filePath: string): Promise<{ snapshotPath?: string; sizeMB?: number }> {
-  const { join } = await import('path');
-  const { tmpdir } = await import('os');
-  const { existsSync, statSync, readdirSync, mkdirSync } = await import('fs');
+  const { join } = require('path');
+  const { tmpdir } = require('os');
+  const { existsSync, statSync, readdirSync, mkdirSync } = require('fs');
 
   const outDir = join(tmpdir(), `cs-heap-${Date.now()}`);
   mkdirSync(outDir, { recursive: true });
 
   try {
-    const { execSync } = await import('child_process');
+    const { execSync } = require('child_process');
 
     execSync(
       `node --heap-prof --heap-prof-dir="${outDir}" "${filePath}"`,

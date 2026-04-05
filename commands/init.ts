@@ -89,7 +89,7 @@ const LABELS: Record<string, Record<string, string>> = {
 };
 
 async function ask(question: string, defaultValue?: string): Promise<string> {
-  const { createInterface } = await import('readline');
+  const { createInterface } = require('readline');
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   return new Promise(resolve => {
     const prompt = defaultValue ? `${question} [${defaultValue}]: ` : `${question}: `;
@@ -143,7 +143,7 @@ export async function runInit(): Promise<void> {
       const roles = await ask('역할 (generate,verify,judge)', 'generate,verify');
 
       if (key) {
-        const { addKey: addKeyFn } = await import('../core/config');
+        const { addKey: addKeyFn } = require('../core/config');
         const defaultModels: Record<string, string> = {
           anthropic: 'claude-sonnet-4-6', openai: 'gpt-5.4-mini', google: 'gemini-2.5-flash',
           groq: 'llama-3.3-70b', ollama: 'llama3',
@@ -193,7 +193,7 @@ export async function runInit(): Promise<void> {
   console.log(`  ✅ ${l.saved}: ~/.cs/config.json`);
 
   // Seed reference DB + 외부 레퍼런스 로드
-  const { seedDB, loadExternalReferences } = await import('../core/reference-db');
+  const { seedDB, loadExternalReferences } = require('../core/reference-db');
   const seeded = seedDB();
   if (seeded > 0) console.log(`  📚 내장 레퍼런스: ${seeded}개 패턴 추가`);
 
@@ -212,7 +212,7 @@ export async function runInit(): Promise<void> {
   }
 
   // Auto-scan style profile
-  const { scanProjectStyle, saveProfile } = await import('../core/style-learning');
+  const { scanProjectStyle, saveProfile } = require('../core/style-learning');
   const profile = scanProjectStyle(process.cwd());
   saveProfile(profile);
   console.log(`  📐 스타일 프로필 저장 (${profile.naming.preferred}, ${profile.formatting.useSemicolons ? 'semicolons' : 'no-semi'})`);

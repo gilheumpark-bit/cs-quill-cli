@@ -56,7 +56,7 @@ export async function buildCommandContext(cwd?: string): Promise<CommandContext>
   let framework: string | undefined;
   let lang = 'ko';
   try {
-    const { loadMergedConfig } = await import('./config');
+    const { loadMergedConfig } = require('./config');
     const config = loadMergedConfig();
     framework = config.framework;
     lang = config.language ?? 'ko';
@@ -65,7 +65,7 @@ export async function buildCommandContext(cwd?: string): Promise<CommandContext>
   // i18n
   let translate: (key: string) => string;
   try {
-    const { t, setLanguage } = await import('./i18n');
+    const { t, setLanguage } = require('./i18n');
     setLanguage(lang);
     translate = t;
   } catch {
@@ -75,7 +75,7 @@ export async function buildCommandContext(cwd?: string): Promise<CommandContext>
   // Preset directive
   let presetDirective = '';
   try {
-    const { getPresetsForFramework, buildPresetDirective } = await import('../commands/preset');
+    const { getPresetsForFramework, buildPresetDirective } = require('../commands/preset');
     if (framework) {
       const presets = getPresetsForFramework(framework);
       presetDirective = buildPresetDirective(presets);
@@ -85,7 +85,7 @@ export async function buildCommandContext(cwd?: string): Promise<CommandContext>
   // Fix-memory (과거 실수 기록)
   let pastMistakes = '';
   try {
-    const { getTopPatterns } = await import('./fix-memory');
+    const { getTopPatterns } = require('./fix-memory');
     const patterns = getTopPatterns(5);
     if (patterns.length > 0) {
       pastMistakes = '[AVOID_MISTAKES]\n' + patterns.map(p => `- ${p.description}: ${p.beforePattern} → ${p.afterPattern} (신뢰도: ${Math.round(p.confidence * 100)}%)`).join('\n');
@@ -95,7 +95,7 @@ export async function buildCommandContext(cwd?: string): Promise<CommandContext>
   // Style directive
   let styleDirective = '';
   try {
-    const { loadProfile, buildStyleDirective } = await import('./style-learning');
+    const { loadProfile, buildStyleDirective } = require('./style-learning');
     const profile = loadProfile(projectName);
     if (profile) styleDirective = buildStyleDirective(profile);
   } catch { /* no style */ }
