@@ -56,6 +56,8 @@ program
   .option('--watch', '파일 변경 시 자동 검증')
   .option('--parallel', 'worker_threads 병렬 실행', true)
   .option('--diff', 'git 변경 파일만 검증 (증분 스캔)')
+  .option('--init-baseline', '현재 결과를 baseline으로 동결')
+  .option('--show-baseline', 'baseline 포함 전체 표시')
   .option('--precision', 'AI 정밀 검증 (48항목 체크리스트, API 키 필요)')
   .option('--precision-quick', 'AI 정밀 검증 P0만 (17항목)')
   .action(async (path, opts) => {

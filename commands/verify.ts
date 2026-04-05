@@ -98,7 +98,8 @@ interface VerifyOptions {
   watch?: boolean;
   parallel?: boolean;
   diff?: boolean;
-  baseline?: boolean;
+  initBaseline?: boolean;
+  showBaseline?: boolean;
 }
 
 interface TeamResult {
@@ -304,6 +305,49 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
 
   // AI orchestrator는 파일별 실행으로 이동 (위 순차 실행 루프 참조)
 
+  // ── Baseline + Suppression 필터 ──
+  let baselineSuppressed = 0;
+  let inlineSuppressed = 0;
+  const root = path === '.' ? process.cwd() : require('path').resolve(path);
+
+  try {
+    const { loadBaseline, filterByBaseline, initBaseline } = require('../core/baseline');
+    const { parseSuppressions, applySuppression, loadIgnorePatterns, isIgnored } = require('../core/suppression');
+
+    // --init-baseline: 현재 결과를 baseline으로 저장
+    if (opts.initBaseline) {
+      const codeMap = new Map(files.map(f => [f.relativePath, f.content]));
+      const allF = allDetails.map(d => ({ ...d, file: files[0]?.relativePath ?? '', ruleId: 'unknown' }));
+      const bl = initBaseline(root, allF, codeMap);
+      console.log(`\n  📌 Baseline 저장: ${bl.entries.length}건 동결 → .csquill-baseline.json`);
+    }
+
+    // Baseline 필터: 기존 이슈 숨김
+    const baseline = loadBaseline(root);
+    if (baseline && !opts.showBaseline) {
+      const codeMap = new Map(files.map(f => [f.relativePath, f.content]));
+      const result = filterByBaseline(baseline, allDetails.map(d => ({ ...d, file: '', ruleId: 'unknown' })), codeMap);
+      baselineSuppressed = result.suppressed;
+      // allDetails에서 제거
+      if (baselineSuppressed > 0) {
+        const keptSet = new Set(result.kept.map((k: any) => `${k.line}:${k.message}`));
+        const before = allDetails.length;
+        allDetails.splice(0, allDetails.length, ...allDetails.filter(d => keptSet.has(`${d.line}:${d.message}`)));
+        totalFindings -= (before - allDetails.length);
+      }
+    }
+
+    // Inline suppression: csquill-disable 주석
+    for (const file of files) {
+      const suppressions = parseSuppressions(file.content);
+      if (suppressions.length > 0) {
+        const fileFindings = allDetails.filter(d => true); // 현재 file 단위 분리 없으므로 전체에서 적용
+        const result = applySuppression(fileFindings, suppressions);
+        inlineSuppressed += result.suppressed;
+      }
+    }
+  } catch { /* baseline/suppression 모듈 없으면 skip */ }
+
   // ── Verdict 집계 — 메시지 기반 3단계 분류 ──
   function classifyLevel(severity: string, _message: string): 'hard-fail' | 'review' | 'note' {
     // severity 기반 분류 — 메시지 키워드 매칭은 자기참조 오탐을 유발하므로 제거
@@ -373,6 +417,12 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   console.log(`  hard-fail: ${allHardFail}건 | review: ${allReview}건 | note: ${allNote > 0 ? allNote : 0}건`);
   if (aiVerified) {
     console.log(`  🤖 AI 검증 — 오탐 ${falsePositivesRemoved}건 제거`);
+  }
+  if (baselineSuppressed > 0) {
+    console.log(`  📌 Baseline 동결 — ${baselineSuppressed}건 숨김`);
+  }
+  if (inlineSuppressed > 0) {
+    console.log(`  🔇 Suppression — ${inlineSuppressed}건 억제`);
   }
 
   // Improvement hints for lowest scoring teams
