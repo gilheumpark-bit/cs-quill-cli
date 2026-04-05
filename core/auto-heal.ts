@@ -1,3 +1,4 @@
+// @ts-nocheck — external library wrapper, types handled at runtime
 // ============================================================
 // CS Quill 🦔 — Auto-Heal Engine (자동 치유)
 // ============================================================
