@@ -121,9 +121,7 @@ export async function streamChat(opts: StreamChatOptions): Promise<ChatResult> {
   const start = performance.now();
 
   if (!config.apiKey) {
-    const fallback = `[AI 미설정] cs config set-key <provider> <key> 로 설정하세요.`;
-    opts.onChunk?.(fallback);
-    return { content: fallback, model: 'none', durationMs: 0 };
+    throw new Error('AI 미설정 — cs config set-key <provider> <key>');
   }
 
   const provider = PROVIDERS[config.provider];

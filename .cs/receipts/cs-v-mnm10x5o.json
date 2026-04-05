@@ -1,0 +1,94 @@
+{
+  "id": "cs-v-mnm10x5o",
+  "timestamp": 1775409582300,
+  "codeHash": "6c658ee83fb7e812482494f3e416a876f63f418a0b8a1f5e76d47ee4177035cb",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "validation",
+        "score": 0,
+        "blocking": true,
+        "findings": 94,
+        "passed": false
+      },
+      {
+        "name": "stability",
+        "score": 87,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "regex",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "ast",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "dead-code",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "design-lint",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "cognitive-load",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "bug-pattern",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "security",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 100,
+        "blocking": false,
+        "findings": 9,
+        "passed": true
+      }
+    ],
+    "overallScore": 88,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "c483326aa966968d38d0a535b8096fc756fb900c6b6f3a6bcf276700ddd861aa"
+}
