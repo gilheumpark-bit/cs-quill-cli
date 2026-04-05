@@ -1,0 +1,73 @@
+{
+  "id": "cs-v-mnmewzb4",
+  "timestamp": 1775432913088,
+  "codeHash": "e0687aaa8689e196e8bdb1d9c79b6c7631067a21246bfd7372657e6cd129bd72",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "validation",
+        "score": 81,
+        "blocking": true,
+        "findings": 268,
+        "passed": true
+      },
+      {
+        "name": "stability",
+        "score": 79,
+        "blocking": false,
+        "findings": 95,
+        "passed": true
+      },
+      {
+        "name": "generation",
+        "score": 66,
+        "blocking": false,
+        "findings": 306,
+        "passed": true
+      },
+      {
+        "name": "governance",
+        "score": 74,
+        "blocking": false,
+        "findings": 426,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 71,
+        "blocking": false,
+        "findings": 456,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 76,
+        "blocking": false,
+        "findings": 248,
+        "passed": true
+      },
+      {
+        "name": "simulation",
+        "score": 82,
+        "blocking": false,
+        "findings": 26,
+        "passed": true
+      },
+      {
+        "name": "release-ip",
+        "score": 77,
+        "blocking": true,
+        "findings": 7,
+        "passed": true
+      }
+    ],
+    "overallScore": 0,
+    "overallStatus": "fail"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "a543b3a9b914e35592594a5db6e6cab9fa93b1cf072120b7e09674a413fb2cbd"
+}

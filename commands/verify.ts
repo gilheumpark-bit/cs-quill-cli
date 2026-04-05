@@ -216,14 +216,19 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     return await runStaticPipeline(file.content, file.language);
   }
 
-  // ── 순차 실행 + 파일별 AI 판정 ──
+  // ── 순차 실행 + 정수 필터 + 파일별 AI 판정 ──
   const allDetails: Array<{ line: number; message: string; severity: string }> = [];
   let aiVerified = false;
   let falsePositivesRemoved = 0;
+  let filterDismissed = 0;
   let aiOrchestrator: any = null;
+  let fpFilter: any = null;
   try {
     aiOrchestrator = require('../ai/verify-orchestrator');
   } catch { /* AI 미설정 */ }
+  try {
+    fpFilter = require('../core/false-positive-filter');
+  } catch { /* 필터 없으면 skip */ }
 
   {
     for (let fi = 0; fi < files.length; fi++) {
@@ -232,9 +237,16 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
       const result = await verifyOneFile(file);
 
       // enhanced _details 수집
-      const fileDetails: Array<{ line: number; message: string; severity: string }> = (result as any)._details ?? [];
+      let fileDetails: Array<{ line: number; message: string; severity: string; ruleId?: string; confidence?: string }> = (result as any)._details ?? [];
 
-      // ── 파일별 AI cross-judge 오탐 필터 ──
+      // ── Stage 1~4: 정수 필터 (AI 호출 전 확정 오탐 제거) ──
+      if (fpFilter && fileDetails.length > 0) {
+        const filterResult = fpFilter.runFalsePositiveFilter(fileDetails, file.relativePath, file.content);
+        filterDismissed += filterResult.dismissed.length;
+        fileDetails = filterResult.kept;
+      }
+
+      // ── Stage 5: 파일별 AI cross-judge 오탐 필터 (정수 필터 통과분만) ──
       if (aiOrchestrator && fileDetails.length > 0) {
         try {
           const aiResult = await aiOrchestrator.orchestrateVerify(
@@ -415,11 +427,14 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const verdictColor = overallVerdict === 'PASS' ? colors.green : overallVerdict === 'REVIEW' ? colors.yellow : colors.red;
   console.log(`  ${verdictIcon} ${verdictColor(overallVerdict)} | ${files.length}파일 | ${duration}ms`);
   console.log(`  hard-fail: ${allHardFail}건 | review: ${allReview}건 | note: ${allNote > 0 ? allNote : 0}건`);
+  if (filterDismissed > 0) {
+    console.log(`  🧹 정수 필터 — ${filterDismissed}건 확정 오탐 제거`);
+  }
   if (aiVerified) {
-    console.log(`  🤖 AI 검증 — 오탐 ${falsePositivesRemoved}건 제거`);
+    console.log(`  🤖 AI 판정 — ${falsePositivesRemoved}건 추가 제거`);
   }
   if (baselineSuppressed > 0) {
-    console.log(`  📌 Baseline 동결 — ${baselineSuppressed}건 숨김`);
+    console.log(`  📌 Baseline — ${baselineSuppressed}건 동결`);
   }
   if (inlineSuppressed > 0) {
     console.log(`  🔇 Suppression — ${inlineSuppressed}건 억제`);
