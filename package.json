@@ -1,0 +1,21 @@
+{
+  "name": "eh-universe-cli",
+  "version": "1.0.0",
+  "description": "Folder-scoped EH Universe Code Studio CLI (panel dispatch + interactive shell)",
+  "type": "module",
+  "bin": {
+    "eh-universe-cli": "./bin/eh-universe-cli.mjs"
+  },
+  "scripts": {
+    "start": "node bin/eh-universe-cli.mjs --help",
+    "test": "node --test test/smoke.test.mjs",
+    "test:verbose": "node --test --test-reporter=spec test/smoke.test.mjs",
+    "smoke": "node bin/eh-universe-cli.mjs run-all"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
