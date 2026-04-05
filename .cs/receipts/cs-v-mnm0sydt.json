@@ -1,0 +1,80 @@
+{
+  "id": "cs-v-mnm0sydt",
+  "timestamp": 1775409210641,
+  "codeHash": "35135aaa6cc23891b40cb3f378c53a17a1127210ce60e125ccf03efcfdaec458",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "validation",
+        "score": 0,
+        "blocking": true,
+        "findings": 18,
+        "passed": false
+      },
+      {
+        "name": "stability",
+        "score": 90,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "ast",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "dead-code",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "design-lint",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "cognitive-load",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "bug-pattern",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "security",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 100,
+        "blocking": false,
+        "findings": 4,
+        "passed": true
+      }
+    ],
+    "overallScore": 86,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "163d7a1324a943d29e86539ad85620e7b4120ca98a05b92df1ff2d62a8a0b4de"
+}
