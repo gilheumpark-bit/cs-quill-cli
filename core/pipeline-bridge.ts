@@ -39,36 +39,41 @@ export async function runStaticPipeline(code: string, language: string): Promise
   // Team 1: Regex (표면 패턴 — 항상 실행, 1차 필터)
   teams.push(runRegexTeam(code, language));
 
-  // Team 2: AST (구조 분석 — typescript 컴파일러 API 필수, ts-morph 선택)
+  // Team 2: AST (4계층 엔진 — createProgram + TypeChecker + esquery)
   try {
-    const { analyzeWithTypeScript } = require('../adapters/ast-engine');
-    const tsResult = await analyzeWithTypeScript(code, 'analysis.ts');
-    const tsFindings = Array.isArray(tsResult) ? tsResult : (tsResult?.findings ?? []);
+    const { runQuillEngine } = require('./quill-engine');
+    const engineResult = runQuillEngine(code, 'analysis.ts');
 
-    // ts-morph 추가 분석 (있으면 병합, 없으면 typescript 단독)
-    let tsMorphFindings: Array<{ line: number; message: string; severity: string }> = [];
-    try {
-      const { analyzeWithTsMorph } = require('../adapters/ast-engine');
-      const tsMorphResult = await analyzeWithTsMorph(code, 'analysis.ts');
-      tsMorphFindings = Array.isArray(tsMorphResult) ? tsMorphResult : (tsMorphResult?.findings ?? []);
-    } catch { /* ts-morph 미설치 — typescript 단독 진행 */ }
+    const allFindings = engineResult.findings.map((f: any) => ({
+      line: f.line ?? 0,
+      message: f.message,
+      severity: f.severity === 'critical' ? 'error' as const : f.severity as 'error' | 'warning' | 'info',
+      ruleId: f.ruleId,
+      confidence: f.confidence,
+      evidence: f.evidence,
+    }));
 
-    // 중복 메시지 제거
+    // evidence 기반 confidence: multi-engine이면 승격 표시
+    const multiEngine = engineResult.enginesUsed.length > 1;
+    if (multiEngine) {
+      // 첫 번째 finding에 엔진 정보 추가
+      if (allFindings.length > 0) {
+        (allFindings[0] as any)._engines = engineResult.enginesUsed.join('+');
+      }
+    }
+
+    // 이하 기존 코드와 호환
     const seen = new Set<string>();
-    const allFindings = [...tsFindings, ...tsMorphFindings]
-      .map((f: any) => ({
-        line: f.line ?? 0, message: f.message,
-        severity: (f.severity === 'error' || f.severity === 'critical' ? 'error' : f.severity === 'info' ? 'info' : 'warning') as 'error' | 'warning' | 'info',
-      }))
-      .filter(f => {
-        const key = `${f.line}:${f.message}`;
-        if (seen.has(key)) return false;
+    const dedupedFindings = allFindings.filter((f: any) => {
+      const key = `${f.line}:${f.message}`;
+      if (seen.has(key)) return false;
         seen.add(key);
         return true;
       });
 
-    const score = Math.max(0, 100 - allFindings.filter(f => f.severity === 'error').length * 15 - allFindings.filter(f => f.severity === 'warning').length * 5);
-    teams.push({ name: 'ast', score, findings: allFindings.slice(0, 20) });
+    const capped = dedupedFindings.slice(0, 20);
+    const score = Math.max(0, 100 - capped.filter((f: any) => f.severity === 'error').length * 10 - capped.filter((f: any) => f.severity === 'warning').length * 2);
+    teams.push({ name: 'ast', score, findings: capped });
   } catch {
     // typescript 자체가 없는 극단적 환경 → 정규식 fallback
     teams.push(runASTFallback(code, language));
