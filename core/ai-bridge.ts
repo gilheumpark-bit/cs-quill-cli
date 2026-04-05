@@ -109,6 +109,20 @@ const PROVIDERS: Record<string, ProviderConfig> = {
     }),
     extractContent: (data: unknown) => data?.message?.content ?? '',
   },
+  'lm-studio': {
+    baseUrl: 'http://192.168.219.102:1234/v1/chat/completions',
+    authHeader: () => ({}), // LM Studio는 인증 불필요
+    bodyBuilder: (opts, model) => ({
+      model,
+      max_tokens: opts.maxTokens ?? 4096,
+      temperature: opts.temperature,
+      messages: [
+        ...(opts.systemInstruction ? [{ role: 'system', content: opts.systemInstruction }] : []),
+        ...opts.messages,
+      ],
+    }),
+    extractContent: (data: unknown) => data?.choices?.[0]?.message?.content ?? '',
+  },
 };
 
 // IDENTITY_SEAL: PART-2 | role=providers | inputs=none | outputs=PROVIDERS

@@ -15,7 +15,7 @@ import { homedir } from 'os';
 
 export interface KeyConfig {
   id: string;
-  provider: 'anthropic' | 'openai' | 'google' | 'groq' | 'mistral' | 'ollama' | 'lmstudio';
+  provider: 'anthropic' | 'openai' | 'google' | 'groq' | 'mistral' | 'ollama' | 'lm-studio';
   key: string;
   model: string;
   roles: string[];
