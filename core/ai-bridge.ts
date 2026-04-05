@@ -118,26 +118,68 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 // ============================================================
 
 export async function streamChat(opts: StreamChatOptions): Promise<ChatResult> {
-  const config = getAIConfig();
-  const start = performance.now();
+  // ── 멀티키 폴백: 모든 등록된 키를 순회하며 시도 ──
+  const { loadMergedConfig } = require('./config');
+  const fullConfig = loadMergedConfig();
+  const allKeys: Array<{ provider: string; key: string; model: string; baseUrl?: string }> = [];
 
-  if (!config.apiKey) {
+  // 1순위: getAIConfig의 기본 키
+  const primary = getAIConfig();
+  if (primary.apiKey) {
+    allKeys.push({ provider: primary.provider, key: primary.apiKey, model: primary.model, baseUrl: primary.baseUrl });
+  }
+
+  // 2순위: config.keys의 나머지 키 (중복 제거)
+  for (const k of fullConfig.keys ?? []) {
+    if (k.key && !allKeys.some(a => a.key === k.key)) {
+      allKeys.push({ provider: k.provider, key: k.key, model: k.model, baseUrl: k.url });
+    }
+  }
+
+  if (allKeys.length === 0) {
     throw new Error('AI 미설정 — cs config set-key <provider> <key>');
   }
 
-  const provider = PROVIDERS[config.provider];
+  const errors: string[] = [];
+  for (let i = 0; i < allKeys.length; i++) {
+    const keyInfo = allKeys[i];
+    try {
+      const result = await _streamChatWithKey(opts, keyInfo.provider, keyInfo.key, keyInfo.model, keyInfo.baseUrl);
+      // 성공 시 즉시 반환
+      if (!result.content.startsWith('[AI Error')) {
+        if (i > 0) console.log(`  🔄 폴백 성공: ${keyInfo.provider}/${keyInfo.model} (${i + 1}번째 키)`);
+        return result;
+      }
+      errors.push(`${keyInfo.provider}: ${result.content.slice(0, 80)}`);
+    } catch (e) {
+      errors.push(`${keyInfo.provider}: ${(e as Error).message.slice(0, 80)}`);
+    }
+  }
+
+  // 모든 키 실패
+  const msg = `[AI 전체 실패] ${allKeys.length}개 키 시도:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}`;
+  opts.onChunk?.(msg);
+  return { content: msg, model: 'none', durationMs: 0 };
+}
+
+async function _streamChatWithKey(
+  opts: StreamChatOptions,
+  providerName: string,
+  apiKey: string,
+  model: string,
+  baseUrl?: string,
+): Promise<ChatResult> {
+  const start = performance.now();
+  const provider = PROVIDERS[providerName];
   if (!provider) {
-    const msg = `[미지원 provider: ${config.provider}]`;
-    opts.onChunk?.(msg);
-    return { content: msg, model: config.provider, durationMs: 0 };
+    return { content: `[미지원 provider: ${providerName}]`, model: providerName, durationMs: 0 };
   }
 
   const temperature = opts.temperature ?? (opts.task ? getTemperature(opts.task) : 0.3);
   const optsWithTemp = { ...opts, temperature };
-  const model = config.model ?? 'default';
 
   // 스트리밍 가능 프로바이더: openai, groq, ollama, anthropic
-  const canStream = ['openai', 'groq', 'ollama', 'anthropic'].includes(config.provider);
+  const canStream = ['openai', 'groq', 'ollama', 'anthropic'].includes(providerName);
 
   // 스트리밍용 body (stream: true 추가)
   const bodyObj = provider.bodyBuilder(optsWithTemp, model);
@@ -147,16 +189,16 @@ export async function streamChat(opts: StreamChatOptions): Promise<ChatResult> {
   let url = provider.baseUrl;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...provider.authHeader(config.apiKey),
+    ...provider.authHeader(apiKey),
   };
 
-  if (config.provider === 'google') {
-    url = `${provider.baseUrl}/${model}:generateContent?key=${config.apiKey}`;
+  if (providerName === 'google') {
+    url = `${provider.baseUrl}/${model}:generateContent?key=${apiKey}`;
   }
-  if (config.baseUrl) {
-    url = config.provider === 'google'
-      ? `${config.baseUrl}/${model}:generateContent?key=${config.apiKey}`
-      : config.baseUrl;
+  if (baseUrl) {
+    url = providerName === 'google'
+      ? `${baseUrl}/${model}:generateContent?key=${apiKey}`
+      : baseUrl;
   }
 
   try {
@@ -193,10 +235,10 @@ export async function streamChat(opts: StreamChatOptions): Promise<ChatResult> {
             const json = JSON.parse(line.slice(6));
             let chunk = '';
 
-            if (config.provider === 'anthropic') {
+            if (providerName === 'anthropic') {
               // Anthropic SSE: content_block_delta
               chunk = json.delta?.text ?? '';
-            } else if (config.provider === 'ollama') {
+            } else if (providerName === 'ollama') {
               chunk = json.message?.content ?? '';
             } else {
               // OpenAI / Groq SSE
