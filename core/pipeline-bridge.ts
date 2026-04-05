@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ============================================================
 // CS Quill 🦔 — Pipeline Bridge
 // ============================================================
@@ -9,14 +8,29 @@
 // PART 1 — Static Pipeline (8팀 통합)
 // ============================================================
 
+export type FindingLevel = 'hard-fail' | 'review-required' | 'style-note';
+
+export interface Finding {
+  ruleId: string;
+  line: number;
+  level: FindingLevel;
+  confidence: 'high' | 'medium' | 'low';
+  message: string;
+}
+
 export interface PipelineResult {
-  score: number;
+  verdict: 'pass' | 'review' | 'fail';
   teams: Array<{
     name: string;
-    score: number;
-    findings: Array<{ line: number; message: string; severity: 'error' | 'warning' | 'info' }>;
+    findings: Finding[];
   }>;
-  summary: string;
+  summary: {
+    hardFail: number;
+    reviewRequired: number;
+    styleNote: number;
+  };
+  // 하위 호환: 기존 코드가 score를 참조하는 곳 대비
+  score: number;
 }
 
 export async function runStaticPipeline(code: string, language: string): Promise<PipelineResult> {
@@ -25,40 +39,50 @@ export async function runStaticPipeline(code: string, language: string): Promise
   // Team 1: Regex (표면 패턴 — 항상 실행, 1차 필터)
   teams.push(runRegexTeam(code, language));
 
-  // Team 2: AST (구조 분석 — ts-morph/acorn 실체 엔진)
+  // Team 2: AST (구조 분석 — typescript 컴파일러 API 필수, ts-morph 선택)
   try {
-    const { analyzeWithTypeScript, analyzeWithTsMorph } = await import('../adapters/ast-engine');
+    const { analyzeWithTypeScript } = require('../adapters/ast-engine');
     const tsResult = await analyzeWithTypeScript(code, 'analysis.ts');
-    const tsMorphResult = await analyzeWithTsMorph(code, 'analysis.ts');
     const tsFindings = Array.isArray(tsResult) ? tsResult : (tsResult?.findings ?? []);
-    const tsMorphFindings = Array.isArray(tsMorphResult) ? tsMorphResult : (tsMorphResult?.findings ?? []);
-    const allFindings = [...tsFindings, ...tsMorphFindings].map((f: any) => ({
-      line: f.line ?? 0, message: f.message, severity: (f.severity === 'error' ? 'error' : 'warning') as 'error' | 'warning',
-    }));
+
+    // ts-morph 추가 분석 (있으면 병합, 없으면 typescript 단독)
+    let tsMorphFindings: Array<{ line: number; message: string; severity: string }> = [];
+    try {
+      const { analyzeWithTsMorph } = require('../adapters/ast-engine');
+      const tsMorphResult = await analyzeWithTsMorph(code, 'analysis.ts');
+      tsMorphFindings = Array.isArray(tsMorphResult) ? tsMorphResult : (tsMorphResult?.findings ?? []);
+    } catch { /* ts-morph 미설치 — typescript 단독 진행 */ }
+
+    // 중복 메시지 제거
+    const seen = new Set<string>();
+    const allFindings = [...tsFindings, ...tsMorphFindings]
+      .map((f: any) => ({
+        line: f.line ?? 0, message: f.message,
+        severity: (f.severity === 'error' || f.severity === 'critical' ? 'error' : f.severity === 'info' ? 'info' : 'warning') as 'error' | 'warning' | 'info',
+      }))
+      .filter(f => {
+        const key = `${f.line}:${f.message}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
     const score = Math.max(0, 100 - allFindings.filter(f => f.severity === 'error').length * 15 - allFindings.filter(f => f.severity === 'warning').length * 5);
     teams.push({ name: 'ast', score, findings: allFindings.slice(0, 20) });
   } catch {
+    // typescript 자체가 없는 극단적 환경 → 정규식 fallback
     teams.push(runASTFallback(code, language));
   }
 
-  // Team 3: Hollow (빈깡통 — AST hollow scan 실체)
-  try {
-    const { runASTHollowScan } = await import('./ast-bridge');
-    const hollow = await runASTHollowScan(code, 'analysis.ts');
-    const findings = hollow.findings.map((f: { message: string; line?: number }) => ({
-      line: f.line ?? 0, message: f.message, severity: 'error' as const,
-    }));
-    teams.push({ name: 'hollow', score: Math.max(0, 100 - findings.length * 20), findings });
-  } catch {
-    teams.push(runHollowCheck(code));
-  }
+  // Team 3: Hollow (빈깡통 — typescript API로 빈 함수 탐지, ast-bridge 순환 제거)
+  teams.push(runHollowCheck(code));
 
   // Team 4: Dead Code (regex 유지 — 인메모리 코드용)
   teams.push(runDeadCodeCheck(code));
 
   // Team 5: Design Lint (prettier 검증 시도)
   try {
-    const { checkPrettier } = await import('../adapters/lint-engine');
+    const { checkPrettier } = require('../adapters/lint-engine');
     const prettierResult = await checkPrettier(code, 'analysis.ts');
     const designFindings = runDesignLintCheck(code).findings;
     const score = prettierResult.isFormatted ? Math.max(70, 100 - designFindings.length * 10) : Math.max(0, 60 - designFindings.length * 10);
@@ -75,13 +99,13 @@ export async function runStaticPipeline(code: string, language: string): Promise
 
   // Team 7: Bug Pattern (deep-verify 6검증 실체 엔진)
   try {
-    const { runDeepVerify } = await import('./deep-verify');
+    const { runDeepVerify } = require('./deep-verify');
     const deepResult = await runDeepVerify(code, 'analysis.ts');
     const findings = deepResult.findings.map((f: { message: string; line?: number; severity?: string }) => ({
       line: f.line ?? 0, message: f.message,
       severity: (f.severity === 'P0' ? 'error' : 'warning') as 'error' | 'warning',
     }));
-    const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 20 - findings.filter(f => f.severity === 'warning').length * 5);
+    const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 10 - findings.filter(f => f.severity === 'warning').length * 2);
     teams.push({ name: 'bug-pattern', score, findings: findings.slice(0, 20) });
   } catch {
     teams.push(runBugPatternCheck(code, language));
@@ -91,15 +115,49 @@ export async function runStaticPipeline(code: string, language: string): Promise
   const secRegex = runSecurityPatternCheck(code, language);
   teams.push(secRegex);
 
-  const avgScore = teams.length > 0
-    ? Math.round(teams.reduce((s, t) => s + t.score, 0) / teams.length)
-    : 0;
+  // ── Verdict 변환: score 기반 → level 기반 ──
+  const verdictTeams: PipelineResult['teams'] = teams.map(t => ({
+    name: t.name,
+    findings: (t.findings as any[]).slice(0, 15).map((f: any) => ({
+      ruleId: `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`,
+      line: f.line ?? 0,
+      level: mapSeverityToLevel(f.severity ?? 'warning'),
+      confidence: mapSeverityToConfidence(f.severity ?? 'warning'),
+      message: f.message ?? String(f),
+    })),
+  }));
+
+  const allFindings = verdictTeams.flatMap(t => t.findings);
+  const hardFail = allFindings.filter(f => f.level === 'hard-fail').length;
+  const reviewRequired = allFindings.filter(f => f.level === 'review-required').length;
+  const styleNote = allFindings.filter(f => f.level === 'style-note').length;
+
+  const verdict: PipelineResult['verdict'] = hardFail > 0 ? 'fail' : reviewRequired > 0 ? 'review' : 'pass';
+
+  // 하위 호환 score
+  const avgScore = verdict === 'pass' ? 100
+    : verdict === 'review' ? Math.max(60, 100 - reviewRequired * 3)
+    : Math.max(0, 50 - hardFail * 10);
 
   return {
+    verdict,
     score: avgScore,
-    teams,
-    summary: `${teams.filter(t => t.score >= 80).length}/${teams.length} teams passed (avg: ${avgScore})`,
+    teams: verdictTeams,
+    summary: { hardFail, reviewRequired, styleNote },
   };
+}
+
+// ── Level/Confidence 변환 헬퍼 ──
+function mapSeverityToLevel(severity: string): FindingLevel {
+  if (severity === 'error' || severity === 'critical') return 'hard-fail';
+  if (severity === 'warning') return 'review-required';
+  return 'style-note';
+}
+
+function mapSeverityToConfidence(severity: string): 'high' | 'medium' | 'low' {
+  if (severity === 'error' || severity === 'critical') return 'high';
+  if (severity === 'warning') return 'medium';
+  return 'low';
 }
 
 // IDENTITY_SEAL: PART-1 | role=pipeline | inputs=code,language | outputs=PipelineResult
@@ -125,16 +183,24 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
     { regex: /new\s+Date\(\)\.getTime/, msg: 'Date.now() 대신 new Date().getTime()', severity: 'info' as unknown },
   ];
 
+  const ruleLinePat = /regex\s*:|\/.*\/[gimsuy]*\s*,|severity\s*:/;
+  // 패턴별 최대 3건, 전체 최대 20건 — 점수 왜곡 방지
+  const patternCounts = new Map<string, number>();
   for (let i = 0; i < lines.length; i++) {
+    if (ruleLinePat.test(lines[i])) continue;
+    if (findings.length >= 20) break;
     for (const p of patterns) {
+      const cnt = patternCounts.get(p.msg) ?? 0;
+      if (cnt >= 3) continue;
       if (p.regex.test(lines[i])) {
         findings.push({ line: i + 1, message: p.msg, severity: p.severity });
+        patternCounts.set(p.msg, cnt + 1);
       }
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 15 - findings.filter(f => f.severity === 'warning').length * 5);
-  return { name: 'regex', score, findings: findings.slice(0, 20) };
+  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 10 - findings.filter(f => f.severity === 'warning').length * 2);
+  return { name: 'regex', score, findings };
 }
 
 function runASTFallback(code: string, _language: string): PipelineResult['teams'][0] {
@@ -153,16 +219,19 @@ function runASTFallback(code: string, _language: string): PipelineResult['teams'
     }
   }
 
-  // 중첩 깊이 검사
+  // 중첩 깊이 검사 — 블록 진입 시 1회만 보고 (빠져나올 때까지 skip)
   let maxDepth = 0;
   let depth = 0;
+  let deepBlockReported = false;
   for (let i = 0; i < lines.length; i++) {
     depth += (lines[i].match(/\{/g) ?? []).length;
     depth -= (lines[i].match(/\}/g) ?? []).length;
     if (depth > maxDepth) maxDepth = depth;
-    if (depth > 5) {
+    if (depth > 5 && !deepBlockReported) {
       findings.push({ line: i + 1, message: `중첩 깊이 ${depth} — 5 초과`, severity: 'warning' });
+      deepBlockReported = true;
     }
+    if (depth <= 5) deepBlockReported = false;
   }
 
   // 파라미터 수 검사
@@ -174,8 +243,9 @@ function runASTFallback(code: string, _language: string): PipelineResult['teams'
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 15 - findings.filter(f => f.severity === 'warning').length * 5);
-  return { name: 'ast', score, findings: findings.slice(0, 15) };
+  const capped = findings.slice(0, 15);
+  const score = Math.max(0, 100 - capped.filter(f => f.severity === 'error').length * 15 - capped.filter(f => f.severity === 'warning').length * 5);
+  return { name: 'ast', score, findings: capped };
 }
 
 function runHollowCheck(code: string): PipelineResult['teams'][0] {
@@ -199,7 +269,7 @@ function runHollowCheck(code: string): PipelineResult['teams'][0] {
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 20 - findings.filter(f => f.severity === 'warning').length * 10);
+  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 10 - findings.filter(f => f.severity === 'warning').length * 3);
   return { name: 'hollow', score, findings };
 }
 
@@ -218,8 +288,9 @@ function runDeadCodeCheck(code: string): PipelineResult['teams'][0] {
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'warning').length * 10);
-  return { name: 'dead-code', score, findings: findings.slice(0, 10) };
+  const cappedDead = findings.slice(0, 10);
+  const score = Math.max(0, 100 - cappedDead.filter(f => f.severity === 'warning').length * 10);
+  return { name: 'dead-code', score, findings: cappedDead };
 }
 
 function runDesignLintCheck(code: string): PipelineResult['teams'][0] {
@@ -245,10 +316,12 @@ function runCognitiveLoadCheck(code: string): PipelineResult['teams'][0] {
   const findings: PipelineResult['teams'][0]['findings'] = [];
   const lines = code.split('\n');
 
-  // 긴 줄
+  // 긴 줄 — 파일당 최대 3건 (동일 유형 500건 폭발 방지)
+  let lineWarnCount = 0;
   for (let i = 0; i < lines.length; i++) {
-    if (lines[i].length > 120) {
+    if (lines[i].length > 120 && lineWarnCount < 3) {
       findings.push({ line: i + 1, message: `줄 길이 ${lines[i].length}자 — 120자 초과`, severity: 'info' as unknown });
+      lineWarnCount++;
     }
   }
 
@@ -265,8 +338,9 @@ function runCognitiveLoadCheck(code: string): PipelineResult['teams'][0] {
     findings.push({ line: 0, message: `파일 ${lines.length}줄 — 300줄 초과, 분리 권장`, severity: 'warning' });
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'warning').length * 5);
-  return { name: 'cognitive-load', score, findings: findings.slice(0, 10) };
+  const cappedCog = findings.slice(0, 10);
+  const score = Math.max(0, 100 - cappedCog.filter(f => f.severity === 'warning').length * 5);
+  return { name: 'cognitive-load', score, findings: cappedCog };
 }
 
 function runBugPatternCheck(code: string, _language: string): PipelineResult['teams'][0] {
@@ -291,8 +365,9 @@ function runBugPatternCheck(code: string, _language: string): PipelineResult['te
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 15 - findings.filter(f => f.severity === 'warning').length * 5);
-  return { name: 'bug-pattern', score, findings: findings.slice(0, 15) };
+  const cappedBug = findings.slice(0, 15);
+  const score = Math.max(0, 100 - cappedBug.filter(f => f.severity === 'error').length * 15 - cappedBug.filter(f => f.severity === 'warning').length * 5);
+  return { name: 'bug-pattern', score, findings: cappedBug };
 }
 
 function runSecurityPatternCheck(code: string, _language: string): PipelineResult['teams'][0] {
@@ -309,7 +384,10 @@ function runSecurityPatternCheck(code: string, _language: string): PipelineResul
     { regex: /api[_-]?key\s*[:=]\s*['"`]\w{10,}/, msg: 'API 키 하드코딩 의심', severity: 'error' },
   ];
 
+  // Skip lines that are regex/rule definitions to avoid self-detection
+  const ruleDefPattern = /regex\s*:|\/.*\/[gimsuy]*\s*,|severity\s*:/;
   for (let i = 0; i < lines.length; i++) {
+    if (ruleDefPattern.test(lines[i])) continue;
     for (const p of secPatterns) {
       if (p.regex.test(lines[i])) {
         findings.push({ line: i + 1, message: p.msg, severity: p.severity });
@@ -317,8 +395,9 @@ function runSecurityPatternCheck(code: string, _language: string): PipelineResul
     }
   }
 
-  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 20 - findings.filter(f => f.severity === 'warning').length * 10);
-  return { name: 'security', score, findings: findings.slice(0, 15) };
+  const cappedSec = findings.slice(0, 15);
+  const score = Math.max(0, 100 - cappedSec.filter(f => f.severity === 'error').length * 20 - cappedSec.filter(f => f.severity === 'warning').length * 10);
+  return { name: 'security', score, findings: cappedSec };
 }
 
 // IDENTITY_SEAL: PART-2 | role=team-impls | inputs=code | outputs=findings
@@ -395,8 +474,8 @@ export async function runProjectAudit(
   rootPath: string,
   _onProgress?: (area: string, index: number, total: number) => void,
 ): Promise<AuditReport> {
-  const { readdirSync, readFileSync, _statSync, existsSync } = await import('fs');
-  const { join, extname } = await import('path');
+  const { readdirSync, readFileSync, _statSync, existsSync } = require('fs');
+  const { join, extname } = require('path');
 
   const areas: AuditArea[] = [];
   const urgent: string[] = [];
@@ -490,21 +569,21 @@ export async function runProjectAudit(
 
   // 9. ESLint 점수
   try {
-    const { runFullLintAnalysis } = await import('../adapters/lint-engine');
+    const { runFullLintAnalysis } = require('../adapters/lint-engine');
     const lint = await runFullLintAnalysis(rootPath, files[0]);
     areas.push({ name: 'ESLint', score: lint.avgScore, findings: lint.results.map(r => `${r.engine}: ${r.detail}`), category: 'quality' });
   } catch { areas.push({ name: 'ESLint', score: 70, findings: ['lint-engine 미설치'], category: 'quality' }); }
 
   // 10. 미사용 의존성
   try {
-    const { runDepcheck } = await import('../adapters/dep-analyzer');
+    const { runDepcheck } = require('../adapters/dep-analyzer');
     const dep = await runDepcheck(rootPath);
     areas.push({ name: '미사용 의존성', score: dep.score, findings: [`unused: ${dep.unused.length}, missing: ${dep.missing.length}`], category: 'performance' });
   } catch { areas.push({ name: '미사용 의존성', score: 80, findings: ['depcheck 미설치'], category: 'performance' }); }
 
   // 11. 심층 버그 (deep-verify)
   try {
-    const { runDeepVerify } = await import('./deep-verify');
+    const { runDeepVerify } = require('./deep-verify');
     const sampleCode = files[0] ? readFileSync(files[0], 'utf-8') : '';
     if (sampleCode) {
       const deep = await runDeepVerify(sampleCode, files[0]);
@@ -516,7 +595,7 @@ export async function runProjectAudit(
 
   // 12. 보안 취약점 (npm audit)
   try {
-    const { runNpmAudit } = await import('../adapters/security-engine');
+    const { runNpmAudit } = require('../adapters/security-engine');
     const audit = await runNpmAudit(rootPath);
     const score = Math.max(0, 100 - audit.critical * 30 - audit.high * 15);
     areas.push({ name: 'npm 취약점', score, findings: [`critical: ${audit.critical}, high: ${audit.high}`], category: 'security' });
@@ -527,7 +606,7 @@ export async function runProjectAudit(
   try {
     const htmlFiles = files.filter(f => f.endsWith('.html') || f.endsWith('.tsx') || f.endsWith('.jsx'));
     if (htmlFiles.length > 0) {
-      const { runAxeAccessibility } = await import('../adapters/web-quality');
+      const { runAxeAccessibility } = require('../adapters/web-quality');
       const sample = readFileSync(htmlFiles[0], 'utf-8');
       const axe = await runAxeAccessibility(sample);
       areas.push({ name: '접근성', score: axe.score, findings: axe.findings.slice(0, 3).map(f => f.message), category: 'quality' });
@@ -536,7 +615,7 @@ export async function runProjectAudit(
 
   // 14. 코드 복잡도 (AST)
   try {
-    const { analyzeWithTsMorph } = await import('../adapters/ast-engine');
+    const { analyzeWithTsMorph } = require('../adapters/ast-engine');
     const sampleCode = files[0] ? readFileSync(files[0], 'utf-8') : '';
     if (sampleCode) {
       const findings = await analyzeWithTsMorph(sampleCode, files[0]);
@@ -547,7 +626,7 @@ export async function runProjectAudit(
 
   // 15. 구버전 API
   try {
-    const { checkDeprecations } = await import('./deprecation-checker');
+    const { checkDeprecations } = require('./deprecation-checker');
     const sampleCode = files[0] ? readFileSync(files[0], 'utf-8') : '';
     if (sampleCode) {
       const deps = checkDeprecations(sampleCode, files[0], rootPath);
@@ -558,7 +637,7 @@ export async function runProjectAudit(
 
   // 16. 번들 크기
   try {
-    const { checkBundleSize } = await import('../adapters/web-quality');
+    const { checkBundleSize } = require('../adapters/web-quality');
     const bundle = await checkBundleSize(rootPath);
     areas.push({ name: '번들 크기', score: bundle.score, findings: [`heavy: ${bundle.heavyCount}, total deps: ${bundle.totalDeps}`], category: 'performance' });
   } catch { /* skip */ }
@@ -647,8 +726,8 @@ export async function scanProject(rootPath: string): Promise<{
   findings: Array<{ file: string; pattern: string; severity: string }>;
   score: number;
 }> {
-  const { readdirSync, readFileSync } = await import('fs');
-  const { join, extname } = await import('path');
+  const { readdirSync, readFileSync } = require('fs');
+  const { join, extname } = require('path');
 
   const findings: Array<{ file: string; pattern: string; severity: string }> = [];
 
@@ -669,6 +748,8 @@ export async function scanProject(rootPath: string): Promise<{
         const full = join(dir, entry.name);
         if (entry.isDirectory()) walk(full, depth + 1);
         else if (['.ts', '.tsx', '.js', '.jsx'].includes(extname(entry.name))) {
+          // Skip pipeline/lint rule files to avoid self-detection false positives
+          if (entry.name === 'pipeline-bridge.ts' || entry.name === 'pipeline-bridge.js') continue;
           try {
             const content = readFileSync(full, 'utf-8');
             for (const p of patterns) {

@@ -1,4 +1,3 @@
-// @ts-nocheck — external library wrapper, types handled at runtime
 // ============================================================
 // CS Quill 🦔 — AST Engine Adapter
 // ============================================================
@@ -10,47 +9,119 @@
 // ============================================================
 
 export async function analyzeWithTypeScript(code: string, fileName: string = 'temp.ts') {
-  const ts = await import('typescript');
+  const ts = require('typescript');
 
   const sourceFile = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
   const findings: Array<{ line: number; message: string; severity: string }> = [];
 
+  const lineOf = (node: import('typescript').Node) =>
+    sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1;
+
+  // ── 구조 통계 ──
+  let fnCount = 0;
+  let maxDepth = 0;
+  let maxFnLines = 0;
+  const declaredVars = new Set<string>();
+  const usedVars = new Set<string>();
+
+  function measureDepth(node: import('typescript').Node, depth: number): void {
+    if (ts.isBlock(node)) {
+      if (depth > maxDepth) maxDepth = depth;
+      depth++;
+    }
+    ts.forEachChild(node, child => measureDepth(child, depth));
+  }
+  measureDepth(sourceFile, 0);
+
   function visit(node: import('typescript').Node): void {
-    // Detect potential null dereference
-    if (ts.isPropertyAccessExpression(node)) {
-      const text = node.expression.getText(sourceFile);
-      // Heuristic: accessing property on result of function call without null check
-      if (ts.isCallExpression(node.expression)) {
-        findings.push({
-          line: sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          message: `Property access on function call result without null check: ${text.slice(0, 50)}`,
-          severity: 'warning',
-        });
+    // 1. 빈 함수 탐지
+    if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node)) {
+      fnCount++;
+      const body = (node as any).body;
+      if (body && ts.isBlock(body)) {
+        const stmtCount = body.statements.length;
+        const fnLines = sourceFile.getLineAndCharacterOfPosition(body.getEnd()).line -
+                        sourceFile.getLineAndCharacterOfPosition(body.getStart()).line;
+        if (fnLines > maxFnLines) maxFnLines = fnLines;
+
+        if (stmtCount === 0) {
+          const name = (node as any).name?.getText?.(sourceFile) ?? 'anonymous';
+          findings.push({ line: lineOf(node), message: `빈 함수: ${name}()`, severity: 'error' });
+        }
+        // 긴 함수 탐지
+        if (fnLines > 60) {
+          const name = (node as any).name?.getText?.(sourceFile) ?? 'anonymous';
+          findings.push({ line: lineOf(node), message: `함수 ${name}() ${fnLines}줄 — 60줄 초과`, severity: 'warning' });
+        }
       }
     }
 
-    // Detect await without try-catch
-    if (ts.isAwaitExpression(node)) {
-      let parent = node.parent;
-      let hasTryCatch = false;
-      while (parent) {
-        if (ts.isTryStatement(parent)) { hasTryCatch = true; break; }
-        parent = parent.parent;
+    // 2. eval() / new Function() 탐지 — AST 기반이므로 규칙 정의 문자열과 혼동 없음
+    if (ts.isCallExpression(node)) {
+      const expr = node.expression;
+      if (ts.isIdentifier(expr) && expr.text === 'eval') {
+        findings.push({ line: lineOf(node), message: 'eval() 호출 — 보안 위험', severity: 'error' });
       }
-      if (!hasTryCatch) {
-        findings.push({
-          line: sourceFile.getLineAndCharacterOfPosition(node.getStart()).line + 1,
-          message: 'await without try-catch — unhandled rejection risk',
-          severity: 'warning',
-        });
+      if (ts.isNewExpression(node.parent) && ts.isIdentifier((node.parent as any).expression) &&
+          (node.parent as any).expression.text === 'Function') {
+        findings.push({ line: lineOf(node), message: 'new Function() — eval 동등', severity: 'error' });
       }
+    }
+    // new Function() 직접 탐지
+    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
+      findings.push({ line: lineOf(node), message: 'new Function() — eval 동등', severity: 'error' });
+    }
+
+    // 3. == / != 탐지 (=== / !== 권장)
+    if (ts.isBinaryExpression(node)) {
+      const op = node.operatorToken.kind;
+      if (op === ts.SyntaxKind.EqualsEqualsToken) {
+        findings.push({ line: lineOf(node), message: '== 사용 — === 권장', severity: 'warning' });
+      }
+      if (op === ts.SyntaxKind.ExclamationEqualsToken) {
+        findings.push({ line: lineOf(node), message: '!= 사용 — !== 권장', severity: 'warning' });
+      }
+    }
+
+    // 4. any 타입 탐지
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) && node.typeName.text === 'any') {
+      findings.push({ line: lineOf(node), message: 'TypeScript any 타입 — 타입 안전성 저하', severity: 'warning' });
+    }
+
+    // 5. console.log 탐지
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const obj = node.expression.expression;
+      const prop = node.expression.name;
+      if (ts.isIdentifier(obj) && obj.text === 'console' &&
+          (prop.text === 'log' || prop.text === 'debug')) {
+        findings.push({ line: lineOf(node), message: `console.${prop.text}() 발견`, severity: 'info' });
+      }
+    }
+
+    // 6. 변수 선언/사용 추적 (미사용 변수)
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
+      declaredVars.add(node.name.text);
+    }
+    if (ts.isIdentifier(node) && !ts.isVariableDeclaration(node.parent)) {
+      usedVars.add(node.text);
+    }
+
+    // 7. 파라미터 5개 초과
+    if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node)) && node.parameters.length > 5) {
+      findings.push({ line: lineOf(node), message: `파라미터 ${node.parameters.length}개 — 5개 초과`, severity: 'warning' });
     }
 
     ts.forEachChild(node, visit);
   }
 
   visit(sourceFile);
-  return { findings, nodeCount: sourceFile.getChildCount() };
+
+  // 구조 경고
+  if (maxDepth > 5) {
+    findings.push({ line: 1, message: `최대 중첩 깊이 ${maxDepth} — 5 초과`, severity: 'warning' });
+  }
+
+  return { findings: findings.slice(0, 30), nodeCount: sourceFile.getChildCount(), fnCount, maxDepth, maxFnLines };
 }
 
 // IDENTITY_SEAL: PART-1 | role=typescript-analysis | inputs=code | outputs=findings
@@ -60,7 +131,7 @@ export async function analyzeWithTypeScript(code: string, fileName: string = 'te
 // ============================================================
 
 export async function analyzeWithTsMorph(code: string, fileName: string = 'temp.ts') {
-  const { Project, SyntaxKind } = await import('ts-morph');
+  const { Project, SyntaxKind } = require('ts-morph');
 
   const project = new Project({ useInMemoryFileSystem: true });
   const sourceFile = project.createSourceFile(fileName, code);
@@ -113,9 +184,9 @@ export async function analyzeWithTsMorph(code: string, fileName: string = 'temp.
 // ============================================================
 
 export async function analyzeWithAcorn(code: string) {
-  const acorn = await import('acorn');
-  const { traverse } = await import('estraverse');
-  const esquery = await import('esquery');
+  const acorn = require('acorn');
+  const { traverse } = require('estraverse');
+  const esquery = require('esquery');
 
   const findings: Array<{ line: number; message: string; severity: string }> = [];
 
@@ -169,7 +240,7 @@ export async function analyzeWithAcorn(code: string) {
 // ============================================================
 
 export async function analyzeWithBabel(code: string) {
-  const { parse } = await import('@babel/parser');
+  const { parse } = require('@babel/parser');
   const findings: Array<{ line: number; message: string; severity: string }> = [];
 
   try {
@@ -197,41 +268,68 @@ export async function analyzeWithBabel(code: string) {
 // ============================================================
 
 export async function runFullASTAnalysis(code: string, fileName: string = 'temp.ts') {
-  const isTS = fileName.endsWith('.ts') || fileName.endsWith('.tsx');
   const results: Array<{ engine: string; findings: Array<{ line: number; message: string; severity: string }> }> = [];
 
-  // Always run acorn (works on JS)
+  // 메인 엔진: TypeScript 컴파일러 API (TS/JS/JSX/TSX 전부 지원)
   try {
-    const acornResult = await analyzeWithAcorn(code);
-    results.push({ engine: 'acorn+estraverse+esquery', findings: acornResult.findings });
+    const tsResult = await analyzeWithTypeScript(code, fileName);
+    results.push({ engine: 'typescript', findings: tsResult.findings });
   } catch { /* skip */ }
 
-  // TS files: run TypeScript + ts-morph
-  if (isTS) {
-    try {
-      const tsResult = await analyzeWithTypeScript(code, fileName);
-      results.push({ engine: 'typescript', findings: tsResult.findings });
-    } catch { /* skip */ }
+  // 보조 엔진: esquery (CSS 셀렉터 기반 AST 패턴 매칭 — typescript에 없는 고유 기능)
+  try {
+    const esqFindings = await analyzeWithEsquery(code);
+    if (esqFindings.findings.length > 0) {
+      results.push({ engine: 'esquery', findings: esqFindings.findings });
+    }
+  } catch { /* skip */ }
 
-    try {
-      const morphResult = await analyzeWithTsMorph(code, fileName);
-      results.push({ engine: 'ts-morph', findings: morphResult.findings });
-    } catch { /* skip */ }
+  // 중복 제거: 같은 라인 + 같은 메시지
+  const seen = new Set<string>();
+  const allFindings = results.flatMap(r => r.findings.map(f => ({ ...f, engine: r.engine })))
+    .filter(f => {
+      const key = `${f.line}:${f.message}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+  return { engines: results.length, findings: allFindings, results };
+}
+
+// esquery 전용 분석 (acorn으로 파싱 후 esquery로 검색 — typescript에 없는 CSS 셀렉터 패턴)
+async function analyzeWithEsquery(code: string) {
+  const acorn = require('acorn');
+  const esquery = require('esquery');
+  const findings: Array<{ line: number; message: string; severity: string }> = [];
+
+  let ast;
+  try {
+    ast = acorn.parse(code, { ecmaVersion: 'latest', sourceType: 'module', locations: true });
+  } catch {
+    return { findings };
   }
 
-  // JSX/TSX: run Babel
-  if (fileName.endsWith('.tsx') || fileName.endsWith('.jsx')) {
-    try {
-      const babelResult = await analyzeWithBabel(code);
-      results.push({ engine: '@babel/parser', findings: babelResult.findings });
-    } catch { /* skip */ }
+  // eval() 호출 (CSS 셀렉터로 정확히 잡음)
+  const evalCalls = esquery.query(ast as never, 'CallExpression[callee.name="eval"]');
+  for (const node of evalCalls) {
+    findings.push({ line: (node as any).loc?.start?.line ?? 1, message: 'eval() 호출 — 보안 위험', severity: 'critical' });
   }
 
-  // Merge and deduplicate
-  const allFindings = results.flatMap(r => r.findings.map(f => ({ ...f, engine: r.engine })));
-  const engines = results.length;
+  // new Function()
+  const newFn = esquery.query(ast as never, 'NewExpression[callee.name="Function"]');
+  for (const node of newFn) {
+    findings.push({ line: (node as any).loc?.start?.line ?? 1, message: 'new Function() — eval 동등', severity: 'critical' });
+  }
 
-  return { engines, findings: allFindings, results };
+  // 3중 루프 탐지
+  const tripleLoop = esquery.query(ast as never,
+    ':matches(ForStatement, WhileStatement, ForOfStatement) :matches(ForStatement, WhileStatement, ForOfStatement) :matches(ForStatement, WhileStatement, ForOfStatement)');
+  if (tripleLoop.length > 0) {
+    findings.push({ line: (tripleLoop[0] as any).loc?.start?.line ?? 1, message: '3중 중첩 루프 — O(n³) 복잡도', severity: 'warning' });
+  }
+
+  return { findings };
 }
 
 // IDENTITY_SEAL: PART-5 | role=unified-runner | inputs=code,fileName | outputs=findings

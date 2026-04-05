@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ============================================================
 // CS Quill 🦔 — AST Bridge (Level 2 Pipeline Enhancer)
 // ============================================================
@@ -37,33 +36,35 @@ export interface EnhancedPipelineResult {
 // AST 분석 결과를 8팀에 매핑하는 규칙.
 
 function mapFindingToTeam(finding: { message: string; severity: string }): string {
-  const msg = finding.message.toLowerCase();
+  const msg = finding.message;
+
+  // Team7 Release-IP: 보안 (가장 먼저 — 보안은 최우선)
+  if (/eval|security|xss|injection|secret|credential|보안|개인키|API 키|password|패스워드/i.test(msg)) return 'release-ip';
 
   // Team1 Simulation: 무한루프, 재귀
-  if (/loop|recursive|infinite|stack overflow/i.test(msg)) return 'simulation';
+  if (/loop|recursive|infinite|stack overflow|루프|재귀/i.test(msg)) return 'simulation';
 
-  // Team2 Generation: TODO, 빈함수, console
-  if (/empty function|todo|fixme|console\./i.test(msg)) return 'generation';
+  // Team6 Stability: 에러핸들링, try-catch, await
+  if (/try.?catch|exception|reject|await.*without|빈 catch|unhandled/i.test(msg)) return 'stability';
 
-  // Team3 Validation: 타입, null, 파라미터
-  if (/null|undefined|type|parameter|nullable|optional/i.test(msg)) return 'validation';
-
-  // Team4 Size-Density: 복잡도, 중첩, 길이
-  if (/nest|depth|complex|cognitive|length/i.test(msg)) return 'size-density';
+  // Team4 Size-Density: 복잡도, 중첩, 길이, 파일 크기
+  if (/nest|depth|complex|cognitive|줄 초과|줄 길이|중첩|깊이|함수.*줄|파일.*줄|파라미터.*개|삼항/i.test(msg)) return 'size-density';
 
   // Team5 Asset-Trace: 미사용, 데드코드
-  if (/unused|dead|unreachable|orphan/i.test(msg)) return 'asset-trace';
+  if (/unused|dead|unreachable|orphan|미사용|@ts-ignore/i.test(msg)) return 'asset-trace';
 
-  // Team6 Stability: 에러핸들링, try-catch
-  if (/try.?catch|error|exception|reject|await.*without/i.test(msg)) return 'stability';
+  // Team3 Validation: 타입, null, ===/!==
+  if (/null|undefined|any 타입|===|!==|==\s|!=\s|타입.*안전|nullable|optional/i.test(msg)) return 'validation';
 
-  // Team7 Release-IP: 보안, eval, secrets
-  if (/eval|security|xss|injection|secret|credential/i.test(msg)) return 'release-ip';
+  // Team2 Generation: 빈함수, TODO, console
+  if (/empty function|빈 함수|todo|fixme|hack|console\.|stub|스텁/i.test(msg)) return 'generation';
 
   // Team8 Governance: 아키텍처, 의존성
-  if (/import|dependency|circular|architecture/i.test(msg)) return 'governance';
+  if (/import|dependency|circular|architecture|의존/i.test(msg)) return 'governance';
 
-  return 'generation'; // default
+  // Default: 메시지에 error 포함이면 stability, 아니면 governance
+  if (/error/i.test(msg)) return 'stability';
+  return 'governance';
 }
 
 function mapSeverity(severity: string): ASTFinding['severity'] {
@@ -83,33 +84,34 @@ export async function runEnhancedPipeline(
   code: string,
   language: string,
   fileName: string,
+  regexResult?: { score: number; teams: Array<{ name: string; score: number; findings: Array<{ line: number; message: string; severity: string }> }> },
 ): Promise<EnhancedPipelineResult> {
   const findings: ASTFinding[] = [];
   const engines: string[] = [];
 
-  // Phase 1: Original regex pipeline
-  const { runStaticPipeline } = await import('../core/pipeline-bridge');
-  const regexResult = await runStaticPipeline(code, language);
-  engines.push('regex-pipeline');
-
+  // Phase 1: Static pipeline 결과 병합 — 팀 이름을 enhanced 팀으로 re-map
   let regexFindingCount = 0;
-  for (const stage of regexResult.teams) {
-    for (const finding of stage.findings) {
-      regexFindingCount++;
-      findings.push({
-        engine: 'regex',
-        line: 0,
-        message: typeof finding === 'string' ? finding : String(finding),
-        severity: 'warning',
-        team: stage.name,
-        confidence: 0.6,
-      });
+  if (regexResult) {
+    engines.push('regex-pipeline');
+    for (const stage of regexResult.teams) {
+      for (const finding of stage.findings) {
+        regexFindingCount++;
+        const msg = typeof finding === 'string' ? finding : (finding as any).message ?? String(finding);
+        findings.push({
+          engine: 'regex',
+          line: typeof finding === 'object' ? (finding as any).line ?? 0 : 0,
+          message: msg,
+          severity: 'warning',
+          team: mapFindingToTeam({ message: msg, severity: 'warning' }),
+          confidence: 0.5,
+        });
+      }
     }
   }
 
   // Phase 2: AST analysis
   try {
-    const { runFullASTAnalysis } = await import('../adapters/ast-engine');
+    const { runFullASTAnalysis } = require('../adapters/ast-engine');
     const astResult = await runFullASTAnalysis(code, fileName);
 
     for (const eng of astResult.results) {
@@ -130,7 +132,7 @@ export async function runEnhancedPipeline(
 
   // Phase 3: LSP diagnostics
   try {
-    const { getDiagnostics } = await import('../adapters/lsp-adapter');
+    const { getDiagnostics } = require('../adapters/lsp-adapter');
     const diagnostics = getDiagnostics(process.cwd());
 
     if (diagnostics.length > 0) {
@@ -161,7 +163,7 @@ export async function runEnhancedPipeline(
 
   // Phase 5: Data Flow Analysis (Level 3 — null flow + taint)
   try {
-    const { trackNullFlow, trackTaintFlow } = await import('./data-flow');
+    const { trackNullFlow, trackTaintFlow } = require('./data-flow');
 
     const nullFlow = await trackNullFlow(code, fileName);
     if (nullFlow.findings.length > 0) {
@@ -189,7 +191,7 @@ export async function runEnhancedPipeline(
 
   // Phase 6: Cross-File Analysis (Level 4 — call graph + circular deps)
   try {
-    const { buildCallGraph, findCircularDeps } = await import('../adapters/lsp-adapter');
+    const { buildCallGraph, findCircularDeps } = require('../adapters/lsp-adapter');
     const graph = buildCallGraph(process.cwd());
     const circles = findCircularDeps(graph);
 
@@ -205,7 +207,7 @@ export async function runEnhancedPipeline(
     }
 
     // Cross-file null flow (Level 4)
-    const { trackCrossFileFlow } = await import('./data-flow');
+    const { trackCrossFileFlow } = require('./data-flow');
     const crossFile = await trackCrossFileFlow(process.cwd());
     if (crossFile.findings.length > 0) {
       engines.push('cross-file-null');
@@ -220,7 +222,7 @@ export async function runEnhancedPipeline(
 
   // Phase 7: Deep Verify (P0~P2 논리 버그)
   try {
-    const { runDeepVerify } = await import('./deep-verify');
+    const { runDeepVerify } = require('./deep-verify');
     const deepResult = runDeepVerify(code, fileName);
     if (deepResult.findings.length > 0) {
       engines.push('deep-verify');
@@ -241,7 +243,7 @@ export async function runEnhancedPipeline(
 
   // Phase 8: CFG Brain Analysis (제어 흐름 그래프 기반 위험 경로)
   try {
-    const { runBrainAnalysis } = await import('./cfg-engine');
+    const { runBrainAnalysis } = require('./cfg-engine');
     const brain = await runBrainAnalysis(code, fileName);
     if (brain.riskPaths.length > 0) {
       engines.push(`cfg-engine(${brain.stats.reductionPercent}% 컨텍스트 절감)`);
@@ -260,17 +262,19 @@ export async function runEnhancedPipeline(
   // Deduplicate: same line + same team = keep higher confidence
   const deduped = deduplicateFindings(findings);
 
-  // Score calculation
+  // Score calculation — 감점 캡 적용 (최대 50점 감점)
   const astFindingCount = deduped.filter(f => f.engine !== 'regex').length;
-  const criticalCount = deduped.filter(f => f.severity === 'critical').length;
-  const errorCount = deduped.filter(f => f.severity === 'error').length;
-  const warningCount = deduped.filter(f => f.severity === 'warning').length;
+  const criticalCount = Math.min(deduped.filter(f => f.severity === 'critical').length, 3);
+  const errorCount = Math.min(deduped.filter(f => f.severity === 'error').length, 5);
+  const warningCount = Math.min(deduped.filter(f => f.severity === 'warning').length, 10);
 
-  const astScore = Math.max(0, 100 - criticalCount * 25 - errorCount * 10 - warningCount * 3);
-  const combinedScore = Math.round((regexResult.score * 0.4 + astScore * 0.6));
+  const penalty = criticalCount * 10 + errorCount * 5 + warningCount * 1;
+  const astScore = Math.max(50, 100 - Math.min(penalty, 50));
+  const regexScore = regexResult?.score ?? 50;
+  const combinedScore = Math.round(regexScore * 0.3 + astScore * 0.7);
 
   return {
-    regexScore: regexResult.score,
+    regexScore: regexScore,
     astScore,
     combinedScore,
     regexFindings: regexFindingCount,
@@ -291,7 +295,7 @@ export async function runASTHollowScan(code: string, fileName: string): Promise<
   const findings: ASTFinding[] = [];
 
   try {
-    const { Project, SyntaxKind } = await import('ts-morph');
+    const { Project, SyntaxKind } = require('ts-morph');
     const project = new Project({ useInMemoryFileSystem: true });
     const sourceFile = project.createSourceFile(fileName, code);
 

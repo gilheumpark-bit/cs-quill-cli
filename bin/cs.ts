@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
 // ============================================================
 // CS Quill 🦔 — CLI Entry Point
 // ============================================================
@@ -28,7 +27,7 @@ program
   .command('init')
   .description('프로젝트 초기화 (온보딩)')
   .action(async () => {
-    const { runInit } = await import('../commands/init');
+    const { runInit } = require('../commands/init');
     await runInit();
   });
 
@@ -44,7 +43,7 @@ program
   .option('--dry-run', '실행 계획만 미리보기')
   .option('--no-tui', 'TUI 없이 실행')
   .action(async (prompt, opts) => {
-    const { runGenerate } = await import('../commands/generate');
+    const { runGenerate } = require('../commands/generate');
     await runGenerate(prompt, opts);
   });
 
@@ -61,9 +60,9 @@ program
   .action(async (path, opts) => {
     // Precision mode: AI-powered review
     if (opts.precision || opts.precisionQuick) {
-      const { readFileSync, _readdirSync, statSync } = await import('fs');
-      const { _join, _extname, _relative } = await import('path');
-      const { runPrecisionReview } = await import('../ai/precision-checklist');
+      const { readFileSync, readdirSync, statSync } = require('fs');
+      const { join, extname, relative } = require('path');
+      const { runPrecisionReview } = require('../ai/precision-checklist');
       const targetPath = path ?? './src';
       const stat = statSync(targetPath);
 
@@ -84,7 +83,7 @@ program
       return;
     }
 
-    const { runVerify } = await import('../commands/verify');
+    const { runVerify } = require('../commands/verify');
     await runVerify(path ?? './src', opts);
   });
 
@@ -95,7 +94,7 @@ program
   .option('--format <fmt>', '출력 포맷: table | json | sarif', 'table')
   .option('--trend', '주간 품질 추이')
   .action(async (opts) => {
-    const { runAudit } = await import('../commands/audit');
+    const { runAudit } = require('../commands/audit');
     await runAudit(opts);
   });
 
@@ -110,7 +109,7 @@ program
   .option('--users <n>', '가상 유저 수', '100')
   .option('--duration <sec>', '테스트 시간(초)', '30')
   .action(async (path, opts) => {
-    const { runStress } = await import('../commands/stress');
+    const { runStress } = require('../commands/stress');
     await runStress(path ?? './src', opts);
   });
 
@@ -121,7 +120,7 @@ program
   .option('--compare <name>', '베이스라인 비교')
   .option('--fail-if-slower <pct>', 'N% 느려지면 실패')
   .action(async (path, opts) => {
-    const { runBench } = await import('../commands/bench');
+    const { runBench } = require('../commands/bench');
     await runBench(path ?? './src', opts);
   });
 
@@ -134,7 +133,7 @@ program
   .option('--challenge', '이번 주 챌린지')
   .option('--share', '벤치마크 카드 생성')
   .action(async (opts) => {
-    const { runPlayground } = await import('../commands/playground');
+    const { runPlayground } = require('../commands/playground');
     await runPlayground(opts);
   });
 
@@ -146,7 +145,7 @@ program
   .command('ip-scan [path]')
   .description('IP/특허/라이선스 스캔')
   .action(async (path, opts) => {
-    const { runIpScan } = await import('../commands/ip-scan');
+    const { runIpScan } = require('../commands/ip-scan');
     await runIpScan(path ?? './src', opts);
   });
 
@@ -157,8 +156,8 @@ program
   .option('--sbom <format>', 'SBOM 생성 (cyclonedx|spdx)')
   .action(async (opts) => {
     if (opts.sbom) {
-      const { generateSBOM } = await import('../commands/compliance');
-      const { writeFileSync } = await import('fs');
+      const { generateSBOM } = require('../commands/compliance');
+      const { writeFileSync } = require('fs');
       const format = opts.sbom === 'spdx' ? 'spdx' : 'cyclonedx';
       const sbom = await generateSBOM(format as 'cyclonedx' | 'spdx');
       const filename = `sbom-${format}.json`;
@@ -166,7 +165,7 @@ program
       console.log(`  📋 SBOM 생성 완료: ${filename} (${format.toUpperCase()})`);
       return;
     }
-    const { runCompliance } = await import('../commands/compliance');
+    const { runCompliance } = require('../commands/compliance');
     await runCompliance(opts);
   });
 
@@ -178,7 +177,7 @@ program
   .command('vibe <prompt>')
   .description('🎵 바이브 모드 — 자연어 100%, 기술 0')
   .action(async (prompt) => {
-    const { runVibe } = await import('../commands/vibe');
+    const { runVibe } = require('../commands/vibe');
     await runVibe(prompt);
   });
 
@@ -186,16 +185,15 @@ program
   .command('explain [path]')
   .description('코드 해설 (PART별 분석)')
   .action(async (path) => {
-    const { runExplain } = await import('../commands/explain');
+    const { runExplain } = require('../commands/explain');
     await runExplain(path ?? '.');
   });
 
 program
-  .command('sprint')
+  .command('sprint <tasks>')
   .description('목록 순차 자동 생성')
-  .argument('<tasks>', '태스크 목록 (줄바꿈 구분)')
   .action(async (tasks) => {
-    const { runSprint } = await import('../commands/sprint');
+    const { runSprint } = require('../commands/sprint');
     await runSprint(tasks);
   });
 
@@ -203,7 +201,7 @@ program
   .command('learn')
   .description('🎓 학습 모드 — 수정 이유 해설')
   .action(async () => {
-    const { runLearn } = await import('../commands/learn');
+    const { runLearn } = require('../commands/learn');
     await runLearn();
   });
 
@@ -211,7 +209,7 @@ program
   .command('suggest')
   .description('💡 프로젝트 개선 추천')
   .action(async () => {
-    const { runSuggest } = await import('../commands/suggest');
+    const { runSuggest } = require('../commands/suggest');
     await runSuggest();
   });
 
@@ -219,7 +217,7 @@ program
   .command('bookmark <action> [args...]')
   .description('🔖 프롬프트 즐겨찾기 (list|add|remove|run)')
   .action(async (action, args) => {
-    const { runBookmark } = await import('../commands/bookmark');
+    const { runBookmark } = require('../commands/bookmark');
     await runBookmark(action, args);
   });
 
@@ -227,7 +225,7 @@ program
   .command('preset <action> [args...]')
   .description('📦 커뮤니티 프리셋 (list|show|install|remove)')
   .action(async (action, args) => {
-    const { runPreset } = await import('../commands/preset');
+    const { runPreset } = require('../commands/preset');
     await runPreset(action, args);
   });
 
@@ -240,7 +238,7 @@ program
   .description('수정본 → 원본 적용')
   .option('--all', '전체 적용')
   .action(async (file, opts) => {
-    const { runApply } = await import('../commands/apply');
+    const { runApply } = require('../commands/apply');
     await runApply(file, opts);
   });
 
@@ -249,7 +247,7 @@ program
   .description('마지막 수정 되돌리기')
   .option('--all', '전부 되돌리기')
   .action(async (opts) => {
-    const { runUndo } = await import('../commands/apply');
+    const { runUndo } = require('../commands/apply');
     await runUndo(opts);
   });
 
@@ -261,7 +259,7 @@ program
   .command('config <action>')
   .description('설정 관리 (keys, structure, level)')
   .action(async (action) => {
-    const { runConfig } = await import('../commands/config');
+    const { runConfig } = require('../commands/config');
     await runConfig(action);
   });
 
@@ -269,7 +267,7 @@ program
   .command('serve [port]')
   .description('로컬 API 서버 (웹/IDE 연동)')
   .action(async (port) => {
-    const { runServe } = await import('../commands/serve');
+    const { runServe } = require('../commands/serve');
     await runServe(port ?? '8080');
   });
 
@@ -280,12 +278,12 @@ program
   .option('--host <host>', '호스트', '127.0.0.1')
   .option('--detach', '백그라운드 실행 (분리 모드)')
   .action(async (opts) => {
-    const { startDaemon } = await import('../daemon');
+    const { startDaemon } = require('../daemon');
     const port = parseInt(opts.port, 10) || 8443;
 
     if (opts.detach) {
       // 백그라운드 실행
-      const { spawn } = await import('child_process');
+      const { spawn } = require('child_process');
       const child = spawn(process.execPath, [__filename, 'daemon', '--port', String(port)], {
         detached: true,
         stdio: 'ignore',
@@ -306,7 +304,7 @@ program
   .option('--team', '팀 리포트')
   .option('--week', '주간 리포트')
   .action(async (opts) => {
-    const { runReport } = await import('../commands/report');
+    const { runReport } = require('../commands/report');
     await runReport(opts);
   });
 
@@ -319,15 +317,15 @@ program
   .action(async (query, opts) => {
     const rootPath = process.cwd();
     if (opts.files) {
-      const { fuzzyFileSearch } = await import('../adapters/search-engine');
+      const { fuzzyFileSearch } = require('../adapters/search-engine');
       const results = fuzzyFileSearch(query, rootPath);
       for (const r of results) console.log(`  ${r.file} (score: ${r.score})`);
     } else if (opts.symbols) {
-      const { symbolSearch } = await import('../adapters/search-engine');
+      const { symbolSearch } = require('../adapters/search-engine');
       const results = symbolSearch(query, rootPath);
       for (const r of results) console.log(`  ${r.type.padEnd(10)} ${r.name.padEnd(30)} ${r.file}:${r.line}`);
     } else {
-      const { ripgrepSearch } = await import('../adapters/search-engine');
+      const { ripgrepSearch } = require('../adapters/search-engine');
       const results = ripgrepSearch(query, rootPath, { glob: opts.glob });
       for (const r of results) console.log(`  ${r.file}:${r.line}  ${r.content.slice(0, 80)}`);
     }
@@ -337,7 +335,7 @@ program
   .command('session [action]')
   .description('📋 세션 관리 (list|show|delete)')
   .action(async (action) => {
-    const { listSessions, getSessionSummary, getCurrentSession, deleteSession } = await import('../core/session');
+    const { listSessions, getSessionSummary, getCurrentSession, deleteSession } = require('../core/session');
     switch (action) {
       case 'list': {
         const sessions = listSessions();
@@ -371,15 +369,15 @@ program
   .option('--inspect <expression>', '변수/표현식 값 확인')
   .action(async (file, opts) => {
     if (opts.inspect) {
-      const { readFileSync } = await import('fs');
-      const { quickInspect } = await import('../adapters/debug-adapter');
+      const { readFileSync } = require('fs');
+      const { quickInspect } = require('../adapters/debug-adapter');
       const code = readFileSync(file, 'utf-8');
       const result = await quickInspect(code, opts.inspect);
       console.log(`  🔍 ${opts.inspect} = ${result}`);
     } else {
-      const { launchDebug } = await import('../adapters/debug-adapter');
+      const { launchDebug } = require('../adapters/debug-adapter');
       console.log(`  🐛 Node Inspector 시작: ${file}`);
-      const session = launchDebug(file);
+      const session = await launchDebug(file);
       if (session) {
         console.log(`  PID: ${session.pid}`);
         console.log(`  Inspector: ${session.inspectorUrl}`);
@@ -394,7 +392,7 @@ program
   .command('fun [action] [args...]')
   .description('🎮 재미 기능 (poem|quiz|art|fortune|create|challenge|quill)')
   .action(async (action, args) => {
-    const { runFun } = await import('../commands/fun');
+    const { runFun } = require('../commands/fun');
     await runFun(action ?? 'help', args);
   });
 
@@ -406,10 +404,10 @@ program
   .command('doctor')
   .description('🩺 환경 진단 — Node, npm, git, AI 키 상태 확인')
   .action(async () => {
-    const { printHeader, printScore, icons, colors } = await import('../core/terminal-compat');
-    const { execSync } = await import('child_process');
-    const { existsSync } = await import('fs');
-    const { join } = await import('path');
+    const { printHeader, printScore, icons, colors } = require('../core/terminal-compat');
+    const { execSync } = require('child_process');
+    const { existsSync } = require('fs');
+    const { join } = require('path');
 
     printHeader('환경 진단');
     console.log('');
@@ -440,7 +438,7 @@ program
     } catch { checks.push({ name: 'TypeScript', score: 50, detail: '미설치 (선택)' }); }
 
     // AI 키
-    const { loadMergedConfig } = await import('../core/config');
+    const { loadMergedConfig } = require('../core/config');
     const config = loadMergedConfig();
     const keyCount = Object.keys(config.keys ?? {}).length;
     checks.push({ name: 'AI 키', score: keyCount > 0 ? 100 : 30, detail: keyCount > 0 ? `${keyCount}개 설정됨` : `미설정 — cs config set-key` });

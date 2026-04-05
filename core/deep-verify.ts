@@ -1,4 +1,3 @@
-// @ts-nocheck
 // ============================================================
 // CS Quill 🦔 — Deep Verification Engine
 // ============================================================
@@ -36,21 +35,44 @@ export interface DeepVerifyResult {
 
 function checkDeclarationOrder(code: string, fileName: string): DeepFinding[] {
   const findings: DeepFinding[] = [];
-  const lines = code.split('\n');
+  // 멀티라인 블록 주석 제거 (/* ... */ 내 식별자 오탐 방지)
+  const cleaned = code.replace(/\/\*[\s\S]*?\*\//g, '');
+  const lines = cleaned.split('\n');
+
+  // Common property/builtin names that cause massive false positives
+  const IGNORE_NAMES = new Set([
+    'name', 'length', 'id', 'type', 'value', 'data', 'key', 'index',
+    'error', 'message', 'result', 'code', 'path', 'config', 'options',
+    'status', 'state', 'content', 'text', 'title', 'label', 'description',
+    'size', 'count', 'width', 'height', 'score', 'level', 'mode', 'kind',
+    'start', 'end', 'line', 'file', 'url', 'query', 'params', 'args',
+    'input', 'output', 'source', 'target', 'parent', 'children', 'items',
+    'entries', 'values', 'keys', 'map', 'set', 'list', 'array', 'buffer',
+    'resolve', 'reject', 'callback', 'handler', 'listener', 'event',
+    'req', 'res', 'ctx', 'env', 'db', 'fn', 'cb', 'el', 'i', 'j', 'k',
+    'e', 'f', 's', 't', 'n', 'm', 'p', 'v', 'x', 'y', 'a', 'b', 'c', 'd',
+    'true', 'false', 'null', 'undefined', 'this', 'self', 'window', 'document',
+    'console', 'process', 'module', 'require', 'Promise', 'Error', 'Array',
+    'Object', 'String', 'Number', 'Boolean', 'Map', 'Set', 'Date', 'RegExp',
+    'JSON', 'Math', 'Symbol', 'Buffer', 'setTimeout', 'clearTimeout',
+  ]);
 
   // Track variable declarations
   const declarations = new Map<string, number>(); // varName → line number
   const usages: Array<{ name: string; line: number }> = [];
 
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
+    const line = lines[i].trim();
+
+    // Skip imports, comments, type annotations
+    if (/^(import |\/\/|\/\*|\*|type |interface |export type |export interface )/.test(line)) continue;
 
     // Declaration patterns
     const declMatch = line.match(/(?:const|let|var)\s+(\w+)\s*[=:]/);
     if (declMatch) {
-      const name = declMatch[1];
-      if (!declarations.has(name)) {
-        declarations.set(name, i + 1);
+      const nm = declMatch[1];
+      if (!declarations.has(nm) && !IGNORE_NAMES.has(nm)) {
+        declarations.set(nm, i + 1);
       }
     }
 
@@ -59,34 +81,43 @@ function checkDeclarationOrder(code: string, fileName: string): DeepFinding[] {
     if (paramMatch) {
       for (const param of paramMatch[1].split(',')) {
         const pName = param.trim().replace(/[:=].*/, '').replace(/\.\.\./g, '').trim();
-        if (pName && !pName.startsWith('_')) {
+        if (pName && !pName.startsWith('_') && !IGNORE_NAMES.has(pName)) {
           declarations.set(pName, i + 1);
         }
       }
     }
 
-    // Usage patterns (identifiers in expressions, not declarations)
-    const identifiers = line.match(/\b[a-zA-Z_]\w*\b/g);
+    // Usage patterns — only standalone identifiers, NOT object properties
+    // Skip: obj.name, obj?.name, obj['name'], "string content", 'string'
+    // Only match identifiers that appear as standalone (not after . or ?.)
+    const stripped = line
+      .replace(/['"`](?:[^'"`\\]|\\.)*['"`]/g, '')   // remove string literals
+      .replace(/\/\/.*$/g, '')                         // remove line comments
+      .replace(/\.\??\w+/g, '');                       // remove .prop and ?.prop access
+    const identifiers = stripped.match(/\b[a-zA-Z_]\w*\b/g);
     if (identifiers) {
-      for (const id of identifiers) {
-        if (/^(const|let|var|function|class|import|export|return|if|else|for|while|new|typeof|await|async|try|catch|throw|break|continue|switch|case|default)$/.test(id)) continue;
-        if (line.includes(`const ${id}`) || line.includes(`let ${id}`) || line.includes(`var ${id}`)) continue;
-        usages.push({ name: id, line: i + 1 });
+      for (const ident of identifiers) {
+        if (IGNORE_NAMES.has(ident)) continue;
+        if (/^(const|let|var|function|class|import|export|return|if|else|for|while|new|typeof|await|async|try|catch|throw|break|continue|switch|case|default|from|as|of|in)$/.test(ident)) continue;
+        if (line.includes(`const ${ident}`) || line.includes(`let ${ident}`) || line.includes(`var ${ident}`)) continue;
+        usages.push({ name: ident, line: i + 1 });
       }
     }
   }
 
-  // Check: usage before declaration (same scope approximation)
+  // Check: usage before declaration — deduplicate per variable name
+  const reported = new Set<string>();
   for (const usage of usages) {
+    if (reported.has(usage.name)) continue;
     const declLine = declarations.get(usage.name);
-    if (declLine && usage.line < declLine && declLine - usage.line > 5) {
-      // Likely a real "use before declare" (not hoisting)
+    if (declLine && usage.line < declLine && declLine - usage.line > 10) {
       findings.push({
         file: fileName, line: usage.line,
         message: `'${usage.name}' used at line ${usage.line} but declared at line ${declLine}`,
-        severity: 'P0', category: 'declaration-order',
+        severity: 'P1', category: 'declaration-order',
         fix: `Move declaration of '${usage.name}' before line ${usage.line}`,
       });
+      reported.add(usage.name);
     }
   }
 

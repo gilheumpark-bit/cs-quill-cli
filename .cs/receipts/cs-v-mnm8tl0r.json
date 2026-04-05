@@ -1,0 +1,73 @@
+{
+  "id": "cs-v-mnm8tl0r",
+  "timestamp": 1775422676907,
+  "codeHash": "b85bf0f7330be07933314afcfc04aa8e8bb33827eb03bdf2f65ff26fd32444f5",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "regex",
+        "score": 73,
+        "blocking": false,
+        "findings": 482,
+        "passed": true
+      },
+      {
+        "name": "ast",
+        "score": 50,
+        "blocking": false,
+        "findings": 886,
+        "passed": true
+      },
+      {
+        "name": "hollow",
+        "score": 100,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "dead-code",
+        "score": 88,
+        "blocking": false,
+        "findings": 106,
+        "passed": true
+      },
+      {
+        "name": "design-lint",
+        "score": 62,
+        "blocking": false,
+        "findings": 84,
+        "passed": true
+      },
+      {
+        "name": "cognitive-load",
+        "score": 75,
+        "blocking": false,
+        "findings": 547,
+        "passed": true
+      },
+      {
+        "name": "bug-pattern",
+        "score": 21,
+        "blocking": false,
+        "findings": 1044,
+        "passed": true
+      },
+      {
+        "name": "security",
+        "score": 96,
+        "blocking": false,
+        "findings": 81,
+        "passed": true
+      }
+    ],
+    "overallScore": 71,
+    "overallStatus": "warn"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "dc6a1115f238748075e16247269734e7963342ec09ccd8167fdd707cb864d117"
+}

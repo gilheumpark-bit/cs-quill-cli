@@ -1,0 +1,80 @@
+════════════════════════════════════════════════════
+  [CS] 8팀 검증
+════════════════════════════════════════════════════
+
+  [DIR] 28개 파일 발견
+  [GO] 워커풀 병렬 모드 (4 workers)
+
+  [TIME] 1/28 파일 검증 완료  [TIME] 2/28 파일 검증 완료  [TIME] 3/28 파일 검증 완료  [TIME] 4/28 파일 검증 완료  [TIME] 5/28 파일 검증 완료  [TIME] 6/28 파일 검증 완료  [TIME] 7/28 파일 검증 완료  [TIME] 8/28 파일 검증 완료  [TIME] 9/28 파일 검증 완료  [TIME] 10/28 파일 검증 완료  [TIME] 11/28 파일 검증 완료  [TIME] 12/28 파일 검증 완료  [TIME] 13/28 파일 검증 완료  [TIME] 14/28 파일 검증 완료  [TIME] 15/28 파일 검증 완료  [TIME] 16/28 파일 검증 완료  [TIME] 17/28 파일 검증 완료  [TIME] 18/28 파일 검증 완료  [TIME] 19/28 파일 검증 완료  [TIME] 20/28 파일 검증 완료  [TIME] 21/28 파일 검증 완료  [TIME] 22/28 파일 검증 완료  [TIME] 23/28 파일 검증 완료  [TIME] 24/28 파일 검증 완료  [TIME] 25/28 파일 검증 완료  [TIME] 26/28 파일 검증 완료  [TIME] 27/28 파일 검증 완료  [TIME] 28/28 파일 검증 완료
+{
+  "files": 28,
+  "teams": [
+    {
+      "name": "regex",
+      "score": 94,
+      "findings": 29,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "ast",
+      "score": 51,
+      "findings": 273,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "hollow",
+      "score": 99,
+      "findings": 2,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "dead-code",
+      "score": 89,
+      "findings": 33,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "design-lint",
+      "score": 60,
+      "findings": 28,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "cognitive-load",
+      "score": 78,
+      "findings": 170,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "bug-pattern",
+      "score": 16,
+      "findings": 377,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    },
+    {
+      "name": "security",
+      "score": 96,
+      "findings": 18,
+      "blocking": false,
+      "passed": true,
+      "details": []
+    }
+  ],
+  "overallScore": 73,
+  "overallStatus": "warn",
+  "duration": 5134
+}
