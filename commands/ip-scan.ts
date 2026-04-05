@@ -6,8 +6,8 @@
 // + GPL 감염 체크
 // + 코드 유사도 경고
 
-import { readFileSync, readdirSync, _statSync, existsSync } from 'fs';
-import { join, _extname, relative } from 'path';
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
+import { join, extname, relative } from 'path';
 
 // ============================================================
 // PART 1 — License Patterns
@@ -146,7 +146,7 @@ function scanSourceCode(rootPath: string): CodeFinding[] {
 // PART 4 — IP Scan Runner
 // ============================================================
 
-export async function runIpScan(_path: string, _opts: Record<string, unknown>): Promise<void> {
+export async function runIpScan(path: string, opts: Record<string, unknown>): Promise<void> {
   const rootPath = process.cwd();
   console.log('🦔 CS Quill — IP/특허/라이선스 스캔\n');
 
@@ -199,7 +199,7 @@ export async function runIpScan(_path: string, _opts: Record<string, unknown>): 
 
   const criticals = findings.filter(f => f.severity === 'critical');
   const warnings = findings.filter(f => f.severity === 'warning');
-  const _infos = findings.filter(f => f.severity === 'info');
+  const infos = findings.filter(f => f.severity === 'info');
 
   if (criticals.length > 0) {
     console.log(`\n  🔴 Critical (${criticals.length}건):`);

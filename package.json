@@ -1,0 +1,65 @@
+{
+  "name": "cs-quill-cli",
+  "version": "0.1.0",
+  "description": "CS Quill 🦔 — Autonomous AI Coding Agent CLI with 56 Open-Source Engines",
+  "author": "EH Universe <gilheumpark-bit>",
+  "license": "SEE LICENSE IN LICENSE",
+  "homepage": "https://github.com/gilheumpark-bit/cs-quill-cli",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/gilheumpark-bit/cs-quill-cli.git"
+  },
+  "keywords": [
+    "cli",
+    "code-quality",
+    "ai",
+    "ast",
+    "linting",
+    "security",
+    "verification",
+    "hedgehog",
+    "typescript",
+    "autonomous-agent"
+  ],
+  "bin": {
+    "cs": "./dist/bin/cs.js",
+    "cs-quill": "./dist/bin/cs.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist/",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "build:watch": "tsc --watch",
+    "start": "node dist/bin/cs.js",
+    "daemon": "node dist/bin/cs.js daemon --port 8443",
+    "prepublishOnly": "npm run build",
+    "clean": "rm -rf dist/"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "commander": "^12.0.0"
+  },
+  "optionalDependencies": {
+    "acorn": "^8.0.0",
+    "axe-core": "^4.0.0",
+    "eslint": "^9.0.0",
+    "fast-check": "^3.0.0",
+    "jscpd": "^4.0.0",
+    "jsdom": "^25.0.0",
+    "madge": "^8.0.0",
+    "prettier": "^3.0.0",
+    "ts-morph": "^23.0.0",
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.39",
+    "typescript": "^5.9.3"
+  }
+}

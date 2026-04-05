@@ -5,7 +5,7 @@
 
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
-import { saveGlobalConfig, loadGlobalConfig, type _CSConfig, type _KeyConfig } from '../core/config';
+import { saveGlobalConfig, loadGlobalConfig, type CSConfig, type KeyConfig } from '../core/config';
 
 // ============================================================
 // PART 1 — Framework Detection

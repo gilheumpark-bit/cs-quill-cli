@@ -6,7 +6,7 @@
 // 타입 추론, 크로스파일 참조, 진단을 수행.
 
 import { execSync } from 'child_process';
-import { readFileSync, existsSync, _writeFileSync } from 'fs';
+import { readFileSync, existsSync, writeFileSync } from 'fs';
 import { join, relative } from 'path';
 
 // ============================================================

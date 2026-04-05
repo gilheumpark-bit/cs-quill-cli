@@ -4,7 +4,7 @@
 // 16영역 프로젝트 건강도 감사. 로컬, $0.
 // 원본 lib/code-studio/audit/audit-engine.ts 호출.
 
-import { readFileSync, readdirSync, _statSync, existsSync } from 'fs';
+import { readFileSync, readdirSync, statSync, existsSync } from 'fs';
 import { join, extname, relative } from 'path';
 
 // ============================================================

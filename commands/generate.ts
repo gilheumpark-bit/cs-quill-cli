@@ -10,10 +10,10 @@ import { createHash } from 'crypto';
 
 import {
   PLANNER_SYSTEM_PROMPT, buildPlannerPrompt, parsePlanResult, buildExecutionWaves,
-  type SealContract, type _PlanResult,
+  type SealContract, type PlanResult,
 } from '../ai/planner';
-import { _TEAM_LEAD_SYSTEM_PROMPT, _buildTeamLeadPrompt, _parseVerdict } from '../ai/team-lead';
-import { _CROSS_JUDGE_SYSTEM_PROMPT, _buildJudgePrompt, _parseJudgeResult } from '../ai/cross-judge';
+import { TEAM_LEAD_SYSTEM_PROMPT, buildTeamLeadPrompt, parseVerdict } from '../ai/team-lead';
+import { CROSS_JUDGE_SYSTEM_PROMPT, buildJudgePrompt, parseJudgeResult } from '../ai/cross-judge';
 import { createLoopGuard } from '../core/loop-guard';
 import { computeReceiptHash, chainReceipt, formatReceipt, type ReceiptData } from '../formatters/receipt';
 
@@ -116,8 +116,8 @@ function deduplicateImports(code: string): string {
 // ============================================================
 
 export async function runGenerate(prompt: string, opts: GenerateOptions): Promise<void> {
-  const { printHeader, _colors, _icons } = await import('../core/terminal-compat');
-  const { _Spinner } = await import('../tui/progress');
+  const { printHeader, colors, icons } = await import('../core/terminal-compat');
+  const { Spinner } = await import('../tui/progress');
   printHeader('코드 생성');
   console.log('');
 

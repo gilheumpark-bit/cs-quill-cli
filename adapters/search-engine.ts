@@ -5,8 +5,8 @@
 // fzf = 퍼지 파일 검색, ripgrep = 코드 내용 검색.
 
 import { execSync } from 'child_process';
-import { readdirSync, _statSync } from 'fs';
-import { join, relative, _extname } from 'path';
+import { readdirSync, statSync } from 'fs';
+import { join, relative, extname } from 'path';
 
 // ============================================================
 // PART 1 — Ripgrep Integration (코드 내용 검색)

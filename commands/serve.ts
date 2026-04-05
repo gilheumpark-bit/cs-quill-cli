@@ -4,7 +4,7 @@
 // 로컬 API 서버. 웹/IDE에서 HTTP로 검증 파이프라인 호출.
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
-import { _readFileSync } from 'fs';
+import { readFileSync } from 'fs';
 
 // ============================================================
 // PART 1 — Route Handlers
