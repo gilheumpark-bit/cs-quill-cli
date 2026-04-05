@@ -1,0 +1,52 @@
+{
+  "id": "cs-mnm3qhc8",
+  "timestamp": 1775414134088,
+  "codeHash": "e56ebaf1bdbd2d0f7a32a07c1718792fc2134f4e10d28f45e4f34d3fb70d7520",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "stability",
+        "score": 90,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "validation",
+        "score": 94,
+        "blocking": true,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "ast",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "design-lint",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 100,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      }
+    ],
+    "overallScore": 84,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 1,
+    "fixesApplied": 0,
+    "stopReason": "passed"
+  },
+  "receiptHash": "eab408a2e0691f1a997b408d50927d08e920ac30a75e37e501b2d441cc4d14de"
+}
