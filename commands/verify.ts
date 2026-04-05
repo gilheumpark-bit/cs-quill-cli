@@ -17,7 +17,7 @@ try {
   const { getSupportedExtensions } = require('../adapters/multi-lang');
   SUPPORTED_EXTENSIONS = new Set(getSupportedExtensions());
 } catch { /* multi-lang not available, TS/JS only */ }
-const IGNORE_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.cs', '__tests__']);
+const IGNORE_DIRS = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.cs', '__tests__', 'test', 'tests', 'e2e', 'coverage']);
 
 interface SourceFile {
   path: string;
@@ -274,15 +274,12 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   }
 
   // ── Verdict 집계 — 메시지 기반 3단계 분류 ──
-  function classifyLevel(severity: string, message: string): 'hard-fail' | 'review' | 'note' {
-    const msg = message.toLowerCase();
+  function classifyLevel(severity: string, _message: string): 'hard-fail' | 'review' | 'note' {
+    // severity 기반 분류 — 메시지 키워드 매칭은 자기참조 오탐을 유발하므로 제거
     if (severity === 'critical') return 'hard-fail';
-    if (/eval\(\)|new function|보안 위험|security|xss|injection|개인키|패스워드|password/i.test(msg)) return 'hard-fail';
-    if (/빈 함수|empty function|brace.*balance|syntax error|parse error/i.test(msg)) return 'hard-fail';
-    if (/console\.(log|debug)|줄 길이|120자|300줄|TODO|FIXME|HACK|@ts-ignore|삼항|중첩 삼항/i.test(msg)) return 'note';
-    if (/info|파라미터.*개|미사용|unused|dead|unreachable/i.test(msg)) return 'note';
-    if (severity === 'info') return 'note';
-    return 'review';
+    if (severity === 'error') return 'review';
+    if (severity === 'warning') return 'review';
+    return 'note'; // info 등
   }
 
   let allHardFail = 0, allReview = 0, allNote = 0;

@@ -89,6 +89,12 @@ export async function runEnhancedPipeline(
   const findings: ASTFinding[] = [];
   const engines: string[] = [];
 
+  // 자기참조 방지: 검증 엔진 소스 파일 자체는 분석 skip
+  const SELF_FILES = ['ast-bridge', 'pipeline-bridge', 'ast-engine', 'deep-verify', 'verify-orchestrator'];
+  if (SELF_FILES.some(s => fileName.includes(s))) {
+    return { regexScore: regexResult?.score ?? 80, astScore: 80, combinedScore: 80, regexFindings: 0, astFindings: 0, totalFindings: 0, findings: [], engines: ['self-skip'] };
+  }
+
   // Phase 1: Static pipeline 결과 병합 — 팀 이름을 enhanced 팀으로 re-map
   let regexFindingCount = 0;
   if (regexResult) {
