@@ -59,7 +59,7 @@ npm audit: 0 vulnerabilities
 ## Quick Start
 
 ```bash
-# Install
+# Install CLI
 npm install -g cs-quill-cli
 
 # Initialize project
@@ -77,6 +77,14 @@ cs daemon --port 8443
 # Environment diagnostics
 cs doctor
 ```
+
+### 📥 VS Code Extension
+
+<a href="https://github.com/gilheumpark-bit/eh-universe-vscode/releases/latest/download/eh-universe-vscode-1.0.0.vsix">
+  <img src="https://img.shields.io/badge/Download-VS%20Code%20Extension-007ACC?style=for-the-badge&logo=visual-studio-code&logoColor=white" alt="Download VSIX" />
+</a>
+
+Real-time diagnostics, one-click fixes, and health score — all inside VS Code. [Details →](https://github.com/gilheumpark-bit/eh-universe-vscode)
 
 ---
 
