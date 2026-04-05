@@ -1,0 +1,24 @@
+{
+  "id": "cs-v-mnm1wfon",
+  "timestamp": 1775411052647,
+  "codeHash": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "design-lint",
+        "score": 97,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      }
+    ],
+    "overallScore": 97,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "88c2de31fd1d729fd5377ed2b9f63d9cb14f8a9edf9f46ec195b414d0c09f32b"
+}

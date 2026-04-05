@@ -1,0 +1,16 @@
+{
+  "id": "cs-v-mnm1w99m",
+  "timestamp": 1775411044330,
+  "codeHash": "5feceb66ffc86f38d952786c6d696c79c2dbc239dd4e91b46729d73a27fb57e9",
+  "pipeline": {
+    "teams": [],
+    "overallScore": 0,
+    "overallStatus": "fail"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "d406665dbb3e37f1677516ccf53f8e311e8003e9da8bca2cd149a185e3db2575"
+}

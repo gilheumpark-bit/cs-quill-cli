@@ -1,0 +1,24 @@
+{
+  "id": "cs-v-mnm1wdoi",
+  "timestamp": 1775411050050,
+  "codeHash": "6b86b273ff34fce19d6b804eff5a3f5747ada4eaa22f1d49c01e52ddb7875b4b",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "stability",
+        "score": 90,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      }
+    ],
+    "overallScore": 90,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "993f2aaf6d94f1c3a7108b439a8a403ec3b82a5701517160724fb877c556444f"
+}
