@@ -10,14 +10,32 @@ export const res005Detector: RuleDetector = {
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for Worker thread 종료 누락
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Worker thread 종료 누락 위반' });
-      // }
-    });
-    */
+    const newExprs = sourceFile.getDescendantsOfKind(SyntaxKind.NewExpression);
+
+    let hasWorker = false;
+    let workerLines: number[] = [];
+
+    for (const expr of newExprs) {
+       if (expr.getExpression().getText() === 'Worker') {
+          hasWorker = true;
+          workerLines.push(expr.getStartLineNumber());
+       }
+    }
+
+    let hasTerminate = false;
+    const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+    for (const call of calls) {
+       const expr = call.getExpression();
+       if (expr.isKind(SyntaxKind.PropertyAccessExpression) && expr.getName() === 'terminate') {
+          hasTerminate = true;
+       }
+    }
+
+    if (hasWorker && !hasTerminate) {
+       for (const line of workerLines) {
+           findings.push({ line, message: 'Worker thread 종료 누락 위반' });
+       }
+    }
 
     return findings;
   }
