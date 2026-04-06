@@ -365,6 +365,22 @@ function detectGoodPatterns(code: string): Set<string> {
   // GQ-EH-010: never exhaustive → CMX-012 억제
   if (/:\s*never\b|assertNever/.test(code)) detected.add('GQ-EH-010');
 
+  // ── 5대 양품 마스터 패턴 ──
+  // 패턴1: HashMap 최적화 → PRF-002 억제
+  if (/new\s+Map\(|new\s+Set\(|\.has\(/.test(code)) detected.add('GQ-PF-002');
+
+  // 패턴2: Dictionary Dispatch → CMX-012 억제
+  if (/Record<.*,.*>\s*=\s*\{/.test(code)) detected.add('GQ-SL-006');
+
+  // 패턴3: Promise.allSettled → ASY-002 억제
+  if (/Promise\.allSettled/.test(code)) detected.add('GQ-AS-003');
+
+  // 패턴4: exhaustive never check → CMX-012 억제
+  if (/const\s+_\w*:\s*never\s*=/.test(code)) detected.add('GQ-FP-004');
+
+  // 패턴5: 선언적 파이프라인 → PRF-002 억제
+  if (/\.filter\([^)]+\)\s*\.\s*map\(|\.map\([^)]+\)\s*\.\s*filter\(/.test(code)) detected.add('GQ-FN-008');
+
   return detected;
 }
 
@@ -394,6 +410,18 @@ const SUPPRESS_MAP: Record<string, string[]> = {
   'GQ-RS-001': ['RES-001', 'RES-002'],
   'GQ-CF-007': ['CFG-010'],
   'GQ-EH-010': ['CMX-012'],
+  // 5대 양품 마스터 패턴
+  'GQ-PF-002': ['PRF-002', 'PRF-007'],
+  'GQ-SL-006': ['CMX-012'],
+  'GQ-AS-003': ['ASY-002'],
+  'GQ-FP-004': ['CMX-012', 'RTE-017'],
+  'GQ-FN-008': ['PRF-002', 'LOG-012'],
+  // G17~G20 추가
+  'GQ-AR-005': ['CFG-007'],
+  'GQ-OB-008': ['SEC-018'],
+  'GQ-NW-006': ['RTE-005', 'RTE-006'],
+  'GQ-NW-007': ['PRF-003'],
+  'GQ-NW-010': ['RTE-005', 'RTE-006'],
 };
 
 // ============================================================

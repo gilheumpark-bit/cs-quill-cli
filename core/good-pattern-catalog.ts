@@ -257,3 +257,61 @@ export function getGoodCatalogStats() {
     totalSuppressions: GOOD_PATTERN_CATALOG.filter(g => g.suppresses && g.suppresses.length > 0).length,
   };
 }
+
+// ── G17: 함수형 프로그래밍 (10) ──
+GOOD_PATTERN_CATALOG.push(
+  g('GQ-FP-001', 'Discriminated Union', 'Reliability', 'boost', 'ast', 'both', 'high'),
+  g('GQ-FP-002', 'Result<T,E> / Either', 'Reliability', 'boost', 'ast', 'both', 'high'),
+  g('GQ-FP-003', 'Option<T> / Maybe', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-FP-004', 'exhaustive match never', 'Reliability', 'boost', 'ast', 'both', 'high', ['CMX-012']),
+  g('GQ-FP-005', 'ADT _tag discriminant', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-FP-006', '고차 함수 HOF', 'Maintainability', 'boost', 'ast', 'both', 'high'),
+  g('GQ-FP-007', 'pipe/compose 패턴', 'Maintainability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-FP-008', '커링 타입 안전', 'Maintainability', 'boost', 'ast', 'both', 'low'),
+  g('GQ-FP-009', 'fp-ts/neverthrow 사용', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-FP-010', '상태 머신 FSM 명시', 'Reliability', 'boost', 'ast', 'both', 'high'),
+);
+
+// ── G18: 아키텍처·결합도 (10) ──
+GOOD_PATTERN_CATALOG.push(
+  g('GQ-AR-001', 'Afferent Coupling 균형', 'Maintainability', 'boost', 'symbol', 'both', 'low'),
+  g('GQ-AR-002', 'Efferent Coupling 낮음', 'Maintainability', 'boost', 'symbol', 'both', 'low'),
+  g('GQ-AR-003', 'Instability 0.3~0.7', 'Maintainability', 'boost', 'symbol', 'both', 'low'),
+  g('GQ-AR-004', 'Main Sequence D<0.2', 'Maintainability', 'boost', 'metric', 'both', 'low'),
+  g('GQ-AR-005', '순환 의존성 없음', 'Maintainability', 'suppress-fp', 'symbol', 'both', 'high', ['CFG-007']),
+  g('GQ-AR-006', '레이어 경계 존중', 'Maintainability', 'boost', 'symbol', 'both', 'medium'),
+  g('GQ-AR-007', 'Ports & Adapters', 'Maintainability', 'boost', 'symbol', 'both', 'medium'),
+  g('GQ-AR-008', '도메인 프레임워크 무의존', 'Maintainability', 'boost', 'symbol', 'ai', 'medium'),
+  g('GQ-AR-009', '파일 응집도 높음', 'Maintainability', 'boost', 'metric', 'both', 'medium'),
+  g('GQ-AR-010', 'CQRS read/write 분리', 'Maintainability', 'boost', 'symbol', 'both', 'low'),
+);
+
+// ── G19: 관찰가능성 (10) ──
+GOOD_PATTERN_CATALOG.push(
+  g('GQ-OB-001', '구조적 로깅 JSON/pino', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-OB-002', '로그 레벨 분리', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-OB-003', 'trace ID 컨텍스트', 'Reliability', 'boost', 'regex', 'both', 'medium'),
+  g('GQ-OB-004', 'OpenTelemetry span', 'Reliability', 'boost', 'ast', 'both', 'low'),
+  g('GQ-OB-005', 'health check 엔드포인트', 'Reliability', 'boost', 'regex', 'both', 'high'),
+  g('GQ-OB-006', '에러 errorCode+context', 'Maintainability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-OB-007', 'async 에러 컨텍스트 유지', 'Reliability', 'boost', 'cfg', 'both', 'medium'),
+  g('GQ-OB-008', '민감 정보 로그 마스킹', 'Security', 'boost', 'regex', 'both', 'medium', ['SEC-018']),
+  g('GQ-OB-009', 'performance.now 래핑', 'Performance', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-OB-010', '메트릭 카운터/게이지', 'Reliability', 'boost', 'ast', 'both', 'low'),
+);
+
+// ── G20: 최신 TypeScript (12) ──
+GOOD_PATTERN_CATALOG.push(
+  g('GQ-NW-001', 'satisfies 연산자', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-002', 'using / await using', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-003', 'const type parameter', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-004', 'import type 분리', 'Maintainability', 'boost', 'ast', 'both', 'high'),
+  g('GQ-NW-005', 'Object.groupBy', 'Maintainability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-006', 'Array.at(-1)', 'Reliability', 'boost', 'ast', 'both', 'high', ['RTE-006']),
+  g('GQ-NW-007', 'structuredClone', 'Reliability', 'boost', 'ast', 'both', 'high', ['PRF-003']),
+  g('GQ-NW-008', 'Promise.withResolvers', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-009', '@decorator 표준', 'Maintainability', 'boost', 'ast', 'both', 'low'),
+  g('GQ-NW-010', 'noUncheckedIndexedAccess', 'Reliability', 'boost', 'ast', 'both', 'high', ['RTE-005', 'RTE-006']),
+  g('GQ-NW-011', 'Awaited<T> 유틸리티', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+  g('GQ-NW-012', 'infer 조건부 타입', 'Reliability', 'boost', 'ast', 'both', 'medium'),
+);
