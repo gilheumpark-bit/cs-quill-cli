@@ -10,6 +10,50 @@ const { readdirSync, readFileSync, statSync } = require('fs');
 const { join, relative, extname } = require('path');
 
 // ============================================================
+// PART 0 — Search Result Cache
+// ============================================================
+
+interface CacheEntry<T> {
+  results: T;
+  timestamp: number;
+  rootPath: string;
+}
+
+const CACHE_TTL_MS = 30_000; // 30 seconds
+const searchCache = new Map<string, CacheEntry<any>>();
+
+function getCacheKey(type: string, query: string, rootPath: string, opts?: Record<string, unknown>): string {
+  return `${type}:${rootPath}:${query}:${JSON.stringify(opts ?? {})}`;
+}
+
+function getCached<T>(key: string): T | null {
+  const entry = searchCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    searchCache.delete(key);
+    return null;
+  }
+  return entry.results as T;
+}
+
+function setCache<T>(key: string, results: T, rootPath: string): void {
+  // Evict old entries when cache grows too large
+  if (searchCache.size > 100) {
+    const cutoff = Date.now() - CACHE_TTL_MS;
+    for (const [k, v] of searchCache) {
+      if (v.timestamp < cutoff) searchCache.delete(k);
+    }
+  }
+  searchCache.set(key, { results, timestamp: Date.now(), rootPath });
+}
+
+export function clearSearchCache(): void {
+  searchCache.clear();
+}
+
+// IDENTITY_SEAL: PART-0 | role=cache | inputs=key,results | outputs=cached
+
+// ============================================================
 // PART 1 — Ripgrep Integration (코드 내용 검색)
 // ============================================================
 
@@ -31,6 +75,10 @@ export function ripgrepSearch(query: string, rootPath: string, opts?: {
   regex?: boolean;
   contextLines?: number;
 }): SearchResult[] {
+  const cacheKey = getCacheKey('rg', query, rootPath, opts as Record<string, unknown>);
+  const cached = getCached<SearchResult[]>(cacheKey);
+  if (cached) return cached;
+
   const maxResults = opts?.maxResults ?? 50;
   const contextLines = opts?.contextLines ?? 0;
   const caseFlag = opts?.caseSensitive ? '' : '-i';
@@ -85,17 +133,41 @@ export function ripgrepSearch(query: string, rootPath: string, opts?: {
       results[idx].contextAfter = ctx.after;
     }
 
+    // Deduplicate: same file+line should only appear once
+    const deduped = deduplicateResults(results);
+
     // Score by relevance
-    return rankSearchResults(results, query);
+    const ranked = rankSearchResults(deduped, query);
+
+    // Cache results
+    setCache(cacheKey, ranked, rootPath);
+
+    return ranked;
   } catch {
     // Fallback: native grep
     return grepFallback(query, rootPath, maxResults);
   }
 }
 
+/** Deduplicate search results by file+line */
+function deduplicateResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  const deduped: SearchResult[] = [];
+
+  for (const r of results) {
+    const key = `${r.file}:${r.line}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(r);
+  }
+
+  return deduped;
+}
+
 /** Rank search results by relevance */
 function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
   const queryLower = query.toLowerCase();
+  const queryTokens = queryLower.split(/[^a-z0-9]+/).filter(Boolean);
 
   for (const r of results) {
     let score = 10; // base score
@@ -110,22 +182,42 @@ function rankSearchResults(results: SearchResult[], query: string): SearchResult
     const wordBoundary = new RegExp(`\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
     if (wordBoundary.test(r.content)) score += 15;
 
+    // Token coverage bonus (how many query words appear)
+    const tokenHits = queryTokens.filter(t => contentLower.includes(t)).length;
+    score += (tokenHits / Math.max(queryTokens.length, 1)) * 10;
+
     // Filename match bonus
     if (fileLower.includes(queryLower)) score += 25;
+    // Filename contains any token
+    const fileTokenHits = queryTokens.filter(t => fileLower.includes(t)).length;
+    score += fileTokenHits * 5;
 
     // Source file priority (not test/spec/mock)
     if (/\.(test|spec|mock|stub|fixture)\./i.test(r.file)) score -= 5;
     else score += 5;
 
-    // Definition-like patterns (function/class/const declarations)
+    // Definition-like patterns (function/class/const declarations) — strong signal
     if (/(?:function|class|const|let|var|export|interface|type)\s/.test(r.content)) score += 10;
+
+    // Export bonus (public API)
+    if (/^export\s/.test(r.content.trimStart())) score += 8;
 
     // Import/require patterns are lower relevance
     if (/(?:import|require)\s/.test(r.content)) score -= 5;
 
+    // Comment-only lines are lower relevance
+    if (/^\s*\/\//.test(r.content) || /^\s*\*/.test(r.content)) score -= 8;
+
+    // Match position bonus (earlier in line = more relevant)
+    const matchPos = contentLower.indexOf(queryLower);
+    if (matchPos >= 0 && matchPos < 20) score += 5;
+
     // Shallower file paths are more relevant
     const depth = (r.file.match(/[/\\]/g) || []).length;
     score -= depth * 2;
+
+    // Shorter content lines tend to be definitions (more focused)
+    if (r.content.length < 80) score += 3;
 
     r.relevanceScore = Math.max(0, score);
   }
@@ -168,6 +260,10 @@ export interface FuzzyResult {
 }
 
 export function fuzzyFileSearch(query: string, rootPath: string, maxResults: number = 20): FuzzyResult[] {
+  const cacheKey = getCacheKey('fuzzy', query, rootPath, { maxResults });
+  const cached = getCached<FuzzyResult[]>(cacheKey);
+  if (cached) return cached;
+
   // Collect all files
   const files: string[] = [];
   const IGNORE = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.cs', '__pycache__', '.cache']);
@@ -196,7 +292,9 @@ export function fuzzyFileSearch(query: string, rootPath: string, maxResults: num
     }
   }
 
-  return results.sort((a, b) => b.score - a.score).slice(0, maxResults);
+  const final = results.sort((a, b) => b.score - a.score).slice(0, maxResults);
+  setCache(cacheKey, final, rootPath);
+  return final;
 }
 
 function fuzzyScore(query: string, target: string): number {
@@ -241,6 +339,10 @@ export interface SymbolResult {
 }
 
 export function symbolSearch(query: string, rootPath: string, maxResults: number = 20): SymbolResult[] {
+  const cacheKey = getCacheKey('symbol', query, rootPath, { maxResults });
+  const cached = getCached<SymbolResult[]>(cacheKey);
+  if (cached) return cached;
+
   const patterns = [
     { regex: `(?:export\\s+)?(?:async\\s+)?function\\s+(${query}\\w*)`, type: 'function' as const },
     { regex: `(?:export\\s+)?class\\s+(${query}\\w*)`, type: 'class' as const },
@@ -305,7 +407,19 @@ export function symbolSearch(query: string, rootPath: string, maxResults: number
     } catch { /* final fallback */ }
   }
 
-  return results.slice(0, maxResults);
+  // Deduplicate by name+file (same symbol may match multiple patterns)
+  const seen = new Set<string>();
+  const deduped: SymbolResult[] = [];
+  for (const r of results) {
+    const key = `${r.name}:${r.file}:${r.line}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(r);
+  }
+
+  const final = deduped.slice(0, maxResults);
+  setCache(cacheKey, final, rootPath);
+  return final;
 }
 
 // IDENTITY_SEAL: PART-3 | role=symbol-search | inputs=query,rootPath | outputs=SymbolResult[]

@@ -1,5 +1,5 @@
 // ============================================================
-// CS Quill 🦔 — AST Bridge (Level 2 Pipeline Enhancer)
+// CS Quill — AST Bridge (Level 2 Pipeline Enhancer)
 // ============================================================
 // 정규식 기반 8팀 결과 + AST 분석 결과를 합산.
 // 기존 파이프라인을 교체하지 않고 보강하는 브릿지.
@@ -17,6 +17,25 @@ export interface ASTFinding {
   confidence: number;
 }
 
+export interface DetectorPerf {
+  ruleId: string;
+  durationMs: number;
+  findingCount: number;
+  error?: string;
+}
+
+export interface ASTMetrics {
+  totalNodesVisited: number;
+  parseTimeMs: number;
+  detectorExecutionMs: number;
+  detectorPerf: DetectorPerf[];
+  detectorsLoaded: number;
+  detectorsExpected: number;
+  memoryBefore: NodeJS.MemoryUsage;
+  memoryAfter: NodeJS.MemoryUsage;
+  memoryDeltaMB: number;
+}
+
 export interface EnhancedPipelineResult {
   regexScore: number;
   astScore: number;
@@ -26,9 +45,10 @@ export interface EnhancedPipelineResult {
   totalFindings: number;
   findings: ASTFinding[];
   engines: string[];
+  metrics?: ASTMetrics;
 }
 
-// IDENTITY_SEAL: PART-1 | role=types | inputs=none | outputs=ASTFinding,EnhancedPipelineResult
+// IDENTITY_SEAL: PART-1 | role=types | inputs=none | outputs=ASTFinding,EnhancedPipelineResult,ASTMetrics
 
 // ============================================================
 // PART 2 — AST Team Mapping
@@ -81,11 +101,54 @@ function mapSeverity(severity: string, ruleId?: string): ASTFinding['severity'] 
   return 'info';
 }
 
+// ============================================================
+// PART 2-B — Finding Validation
+// ============================================================
+
+/** Validate a detector result: line must be > 0, message must be non-empty. */
+function isValidFinding(f: { line: number; message: string }): boolean {
+  if (typeof f.line !== 'number' || f.line <= 0) return false;
+  if (typeof f.message !== 'string' || f.message.trim().length === 0) return false;
+  return true;
+}
+
 // IDENTITY_SEAL: PART-2 | role=team-mapping | inputs=finding | outputs=teamName
+
+// ============================================================
+// PART 2-C — Self-Skip Pattern Set
+// ============================================================
+
+const SELF_REFERENCE_PATTERNS: Set<string> = new Set([
+  'ast-bridge',
+  'pipeline-bridge',
+  'ast-engine',
+  'deep-verify',
+  'verify-orchestrator',
+  'detector-registry',
+  'rule-catalog',
+  'false-positive-filter',
+  'cfg-engine',
+  'data-flow',
+  'pre-filter',
+  'lsp-adapter',
+  'perf-engine',
+  'hollow-scan',
+  'stress',
+]);
+
+/** Robust self-skip: checks against a Set of known analysis-infrastructure file patterns. */
+function isSelfReference(fileName: string): boolean {
+  const normalized = fileName.replace(/\\/g, '/').toLowerCase();
+  const baseName = normalized.split('/').pop() ?? '';
+  const stem = baseName.replace(/\.(ts|js|tsx|jsx|mjs|cjs)$/, '');
+  return SELF_REFERENCE_PATTERNS.has(stem);
+}
 
 // ============================================================
 // PART 3 — Bridge: Merge Regex + AST
 // ============================================================
+
+const EXPECTED_DETECTOR_COUNT = 224;
 
 export async function runEnhancedPipeline(
   code: string,
@@ -93,12 +156,14 @@ export async function runEnhancedPipeline(
   fileName: string,
   regexResult?: { score: number; teams: Array<{ name: string; score: number; findings: Array<{ line: number; message: string; severity: string }> }> },
 ): Promise<EnhancedPipelineResult> {
+  const memBefore = process.memoryUsage();
+  const pipelineStart = performance.now();
   const findings: ASTFinding[] = [];
   const engines: string[] = [];
+  let metrics: ASTMetrics | undefined;
 
   // 자기참조 방지: 검증 엔진 소스 파일 자체는 분석 skip
-  const SELF_FILES = ['ast-bridge', 'pipeline-bridge', 'ast-engine', 'deep-verify', 'verify-orchestrator'];
-  if (SELF_FILES.some(s => fileName.includes(s))) {
+  if (isSelfReference(fileName)) {
     return { regexScore: regexResult?.score ?? 80, astScore: 80, combinedScore: 80, regexFindings: 0, astFindings: 0, totalFindings: 0, findings: [], engines: ['self-skip'] };
   }
 
@@ -110,9 +175,12 @@ export async function runEnhancedPipeline(
       for (const finding of stage.findings) {
         regexFindingCount++;
         const msg = typeof finding === 'string' ? finding : (finding as any).message ?? String(finding);
+        const line = typeof finding === 'object' ? (finding as any).line ?? 0 : 0;
+        // Validate before adding
+        if (msg.trim().length === 0) continue;
         findings.push({
           engine: 'regex',
-          line: typeof finding === 'object' ? (finding as any).line ?? 0 : 0,
+          line,
           message: msg,
           severity: 'warning',
           team: mapFindingToTeam({ message: msg, severity: 'warning' }),
@@ -132,6 +200,7 @@ export async function runEnhancedPipeline(
     }
 
     for (const f of astResult.findings) {
+      if (!isValidFinding(f)) continue;
       findings.push({
         engine: (f as any).engine ?? 'ast',
         line: f.line,
@@ -151,6 +220,7 @@ export async function runEnhancedPipeline(
     if (diagnostics.length > 0) {
       engines.push('tsc-lsp');
       for (const d of diagnostics.slice(0, 50)) {
+        if (!isValidFinding(d)) continue;
         findings.push({
           engine: 'tsc',
           line: d.line,
@@ -172,6 +242,8 @@ export async function runEnhancedPipeline(
         findings.push(h);
       }
     }
+    // Collect metrics from the hollow scan (set after runASTHollowScan completes)
+    metrics = _lastScanMetrics ?? undefined;
   } catch { /* skip */ }
 
   // Phase 5: Data Flow Analysis (Level 3 — null flow + taint)
@@ -182,6 +254,7 @@ export async function runEnhancedPipeline(
     if (nullFlow.findings.length > 0) {
       engines.push('data-flow-null');
       for (const f of nullFlow.findings) {
+        if (!isValidFinding(f)) continue;
         findings.push({
           engine: 'data-flow', line: f.line, message: f.message,
           severity: f.severity === 'error' ? 'error' : 'warning',
@@ -194,6 +267,7 @@ export async function runEnhancedPipeline(
     if (taint.findings.length > 0) {
       engines.push('taint-analysis');
       for (const f of taint.findings) {
+        if (!isValidFinding(f)) continue;
         findings.push({
           engine: 'taint', line: f.line, message: f.message,
           severity: 'critical', team: 'release-ip', confidence: 0.92,
@@ -213,7 +287,7 @@ export async function runEnhancedPipeline(
       for (const circle of circles.slice(0, 5)) {
         findings.push({
           engine: 'call-graph', line: 0,
-          message: `Circular dependency: ${circle.join(' → ')}`,
+          message: `Circular dependency: ${circle.join(' -> ')}`,
           severity: 'warning', team: 'governance', confidence: 0.95,
         });
       }
@@ -225,6 +299,7 @@ export async function runEnhancedPipeline(
     if (crossFile.findings.length > 0) {
       engines.push('cross-file-null');
       for (const f of crossFile.findings) {
+        if (!isValidFinding(f)) continue;
         findings.push({
           engine: 'cross-file', line: f.line, message: f.message,
           severity: 'error', team: 'validation', confidence: 0.88,
@@ -240,6 +315,7 @@ export async function runEnhancedPipeline(
     if (deepResult.findings.length > 0) {
       engines.push('deep-verify');
       for (const f of deepResult.findings) {
+        if (!isValidFinding(f)) continue;
         findings.push({
           engine: 'deep-verify', line: f.line, message: `[${f.severity}] ${f.message}`,
           severity: f.severity === 'P0'
@@ -261,7 +337,7 @@ export async function runEnhancedPipeline(
     const { runBrainAnalysis } = require('./cfg-engine');
     const brain = await runBrainAnalysis(code, fileName);
     if (brain.riskPaths.length > 0) {
-      engines.push(`cfg-engine(${brain.stats.reductionPercent}% 컨텍스트 절감)`);
+      engines.push(`cfg-engine(${brain.stats.reductionPercent}% context reduction)`);
       for (const path of brain.riskPaths) {
         findings.push({
           engine: 'cfg', line: path.nodes[0]?.line ?? 0,
@@ -277,7 +353,7 @@ export async function runEnhancedPipeline(
   // Deduplicate: same line + same team = keep higher confidence
   const deduped = deduplicateFindings(findings);
 
-  // ── 정수 필터 적용 (점수 계산 전에 확정 오탐 제거) ──
+  // -- 정수 필터 적용 (점수 계산 전에 확정 오탐 제거) --
   let filtered = deduped;
   try {
     const { runFalsePositiveFilter } = require('./false-positive-filter');
@@ -294,7 +370,7 @@ export async function runEnhancedPipeline(
     filtered = deduped.filter(f => keptSet.has(`${f.line}:${f.message}`));
   } catch { /* 필터 없으면 원본 사용 */ }
 
-  // ── 양품 패턴 부스트 ──
+  // -- 양품 패턴 부스트 --
   let goodPatternBoost = 0;
   try {
     const { detectGoodPatterns } = require('./false-positive-filter');
@@ -313,12 +389,29 @@ export async function runEnhancedPipeline(
 
   if (process.env.CS_DEBUG) {
     console.error(`  [DEBUG] ast-bridge score: filtered=${filtered.length} crit=${criticalCount} err=${errorCount} warn=${warningCount} boost=${goodPatternBoost} regexScore=${regexResult?.score}`);
+    if (metrics) {
+      console.error(`  [DEBUG] ast-metrics: nodes=${metrics.totalNodesVisited} parseTime=${metrics.parseTimeMs.toFixed(1)}ms detectorTime=${metrics.detectorExecutionMs.toFixed(1)}ms loaded=${metrics.detectorsLoaded}/${metrics.detectorsExpected} memDelta=${metrics.memoryDeltaMB.toFixed(1)}MB`);
+      const slow = metrics.detectorPerf.filter(d => d.durationMs > 10).sort((a, b) => b.durationMs - a.durationMs);
+      if (slow.length > 0) {
+        console.error(`  [DEBUG] slow detectors: ${slow.slice(0, 5).map(d => `${d.ruleId}(${d.durationMs.toFixed(1)}ms)`).join(', ')}`);
+      }
+      const errored = metrics.detectorPerf.filter(d => d.error);
+      if (errored.length > 0) {
+        console.error(`  [DEBUG] errored detectors: ${errored.map(d => `${d.ruleId}: ${d.error}`).join('; ')}`);
+      }
+    }
   }
 
   const penalty = criticalCount * 10 + errorCount * 5 + warningCount * 1;
   const astScore = Math.min(100, Math.max(50, 100 - Math.min(penalty, 50) + goodPatternBoost));
   const regexScore = regexResult?.score ?? 50;
   const combinedScore = Math.round(regexScore * 0.3 + astScore * 0.7);
+
+  const memAfter = process.memoryUsage();
+  if (metrics) {
+    metrics.memoryAfter = memAfter;
+    metrics.memoryDeltaMB = (memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024;
+  }
 
   return {
     regexScore: regexScore,
@@ -329,6 +422,7 @@ export async function runEnhancedPipeline(
     totalFindings: filtered.length,
     findings: filtered,
     engines,
+    metrics,
   };
 }
 
@@ -338,7 +432,12 @@ export async function runEnhancedPipeline(
 // PART 4 — AST-Enhanced Hollow Code Scanner
 // ============================================================
 
+/** Module-level variable to pass metrics back from hollow scan to bridge. */
+let _lastScanMetrics: ASTMetrics | null = null;
+
 export async function runASTHollowScan(code: string, fileName: string): Promise<ASTFinding[]> {
+  _lastScanMetrics = null;
+
   // --- Pre-filter: chunk large / obfuscated files instead of blocking ---
   const { preFilter } = require('./pre-filter');
   const pf = preFilter(code, fileName);
@@ -363,10 +462,17 @@ export async function runASTHollowScan(code: string, fileName: string): Promise<
 /** Inner scan logic for a single code chunk. */
 async function runASTHollowScanSingle(code: string, fileName: string): Promise<ASTFinding[]> {
   const findings: ASTFinding[] = [];
+  const detectorPerf: DetectorPerf[] = [];
+  let totalNodesVisited = 0;
+  let parseTimeMs = 0;
+  let detectorExecutionMs = 0;
+  const memBefore = process.memoryUsage();
 
   try {
     const { Project, SyntaxKind } = require('ts-morph');
     const ts = require('typescript');
+
+    const parseStart = performance.now();
     const project = new Project({
       useInMemoryFileSystem: true,
       compilerOptions: {
@@ -377,6 +483,10 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
       },
     });
     const sourceFile = project.createSourceFile(fileName, code);
+    parseTimeMs = performance.now() - parseStart;
+
+    // Count total AST nodes
+    sourceFile.forEachDescendant(() => { totalNodesVisited++; });
 
     // 1. Empty functions (AST precise) — both declarations and const arrows
     for (const fn of sourceFile.getFunctions()) {
@@ -384,7 +494,7 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
       if (body && body.getStatements().length === 0) {
         findings.push({
           engine: 'ts-morph', line: fn.getStartLineNumber(),
-          message: `Empty function: ${fn.getName() ?? 'anonymous'} — body has 0 statements`,
+          message: `Empty function: ${fn.getName() ?? 'anonymous'} -- body has 0 statements`,
           severity: 'warning', team: 'generation', confidence: 0.95,
         });
       }
@@ -459,7 +569,7 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
           if (!/\/\/|\/\*/.test(fullText)) {
             findings.push({
               engine: 'ts-morph', line: catchClause.getStartLineNumber(),
-              message: 'Empty catch block — errors silently swallowed without comment',
+              message: 'Empty catch block -- errors silently swallowed without comment',
               severity: 'warning', team: 'stability', confidence: 0.9,
             });
           }
@@ -519,28 +629,64 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
         if (depth >= 3) {
           findings.push({
             engine: 'ts-morph', line: node.getStartLineNumber(),
-            message: `Triple-nested loop (depth ${depth}) — O(n^${depth}) complexity`,
+            message: `Triple-nested loop (depth ${depth}) -- O(n^${depth}) complexity`,
             severity: 'warning', team: 'simulation', confidence: 0.9,
           });
         }
       }
     });
 
-    // --- [Phase 4-B] Registered Plug-in Detectors (414 Rule Connectors) ---
+    // --- [Phase 4-B] Registered Plug-in Detectors (224 Rule Connectors) ---
+    const detectorExecStart = performance.now();
     const { loadAllDetectors } = require('./detectors');
     const { getRule } = require('./rule-catalog');
-    
+
     const registry = loadAllDetectors();
-    for (const detector of registry.getDetectors()) {
+    const allDetectors = registry.getDetectors();
+    const detectorsLoaded = allDetectors.length;
+
+    // Log count mismatch if detectors loaded differs from expected
+    if (detectorsLoaded !== EXPECTED_DETECTOR_COUNT && process.env.CS_DEBUG) {
+      console.error(`  [WARN] Detector count mismatch: loaded=${detectorsLoaded} expected=${EXPECTED_DETECTOR_COUNT}`);
+    }
+
+    for (const detector of allDetectors) {
+      const dStart = performance.now();
+      let dFindings: Array<{ line: number; message: string }> = [];
+      let dError: string | undefined;
+
+      // Error isolation: if one detector throws, catch and continue with others
+      try {
+        dFindings = detector.detect(sourceFile);
+      } catch (detErr: any) {
+        dError = detErr?.message ?? String(detErr);
+        detectorPerf.push({
+          ruleId: detector.ruleId,
+          durationMs: performance.now() - dStart,
+          findingCount: 0,
+          error: dError,
+        });
+        continue;
+      }
+
+      const dDuration = performance.now() - dStart;
+      detectorPerf.push({
+        ruleId: detector.ruleId,
+        durationMs: dDuration,
+        findingCount: dFindings.length,
+      });
+
       const ruleMeta = getRule(detector.ruleId) || {
         severity: 'warning',
         category: 'generation',
         confidence: 'high'
       };
-      
-      const pFindings = detector.detect(sourceFile);
-      for (const pf of pFindings) {
-        // Map severity based on rule category prefix (SEC/RTE → critical, ERR/TYP/ASY → error, rest → warning)
+
+      for (const pf of dFindings) {
+        // Validate detector results
+        if (!isValidFinding(pf)) continue;
+
+        // Map severity based on rule category prefix (SEC/RTE -> critical, ERR/TYP/ASY -> error, rest -> warning)
         const ruleCategory = detector.ruleId ? detector.ruleId.split('-')[0].toUpperCase() : '';
         let mappedSev: 'critical'|'error'|'warning'|'info' = 'warning';
         if (ruleMeta.severity === 'critical' || ruleMeta.severity === 'high') {
@@ -565,6 +711,21 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
         });
       }
     }
+    detectorExecutionMs = performance.now() - detectorExecStart;
+
+    // Build and store metrics
+    const memAfter = process.memoryUsage();
+    _lastScanMetrics = {
+      totalNodesVisited,
+      parseTimeMs,
+      detectorExecutionMs,
+      detectorPerf,
+      detectorsLoaded,
+      detectorsExpected: EXPECTED_DETECTOR_COUNT,
+      memoryBefore: memBefore,
+      memoryAfter: memAfter,
+      memoryDeltaMB: (memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024,
+    };
 
   } catch { /* ts-morph not available */ }
 

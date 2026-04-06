@@ -16,6 +16,8 @@ export interface Finding {
   level: FindingLevel;
   confidence: 'high' | 'medium' | 'low';
   message: string;
+  detectors?: string[];         // which teams/engines flagged this
+  correlationGroup?: string;    // grouped related findings share this key
 }
 
 /** 팀 레이어 내부 finding — severity로 점수 계산 후 verdict Finding으로 변환 */
@@ -34,6 +36,13 @@ export interface TeamPipelineChunk {
   findings: TeamRawFinding[];
 }
 
+export interface TeamPerformanceMetrics {
+  teamName: string;
+  findingsCount: number;
+  dismissRate: number;       // 0–1, how many were dismissed by FP filter
+  elapsedMs: number;         // time taken by this team
+}
+
 export interface PipelineResult {
   verdict: 'pass' | 'review' | 'fail';
   teams: Array<{
@@ -48,14 +57,38 @@ export interface PipelineResult {
   };
   // 하위 호환: 기존 코드가 score를 참조하는 곳 대비
   score: number;
+  teamMetrics?: TeamPerformanceMetrics[];
+  correlationGroups?: Array<{ groupKey: string; findingIds: string[]; rootCause: string }>;
 }
 
+// ── Category weight for team scoring ──
+const TEAM_CATEGORY_WEIGHT: Record<string, number> = {
+  'security': 2.0,   // SEC team — critical category
+  'regex': 1.0,
+  'ast': 1.0,
+  'hollow': 1.0,
+  'dead-code': 0.8,
+  'design-lint': 0.5, // STL team — style is lowest weight
+  'cognitive-load': 0.7,
+  'bug-pattern': 1.5,
+};
+
 // ── 팀별 정수 필터 헬퍼 ──
+// Returns team result + metrics for performance tracking
+interface FilteredTeamResult {
+  name: string;
+  score: number;
+  findings: any[];
+  _metrics?: { preFP: number; postFP: number; elapsedMs: number };
+}
+
 function filterTeamFindings(
   teamResult: { name: string; score: number; findings: any[] },
   code: string,
   filePath: string = 'analysis.ts',
-): typeof teamResult {
+): FilteredTeamResult {
+  const t0 = Date.now();
+  const preFP = teamResult.findings.length;
   try {
     const { runFalsePositiveFilter } = require('./false-positive-filter');
     const mapped = teamResult.findings.map((f: any) => ({
@@ -72,15 +105,22 @@ function filterTeamFindings(
     const errors = kept.filter((f: any) => f.severity === 'error').length;
     const otherCriticals = kept.filter((f: any) => f.severity === 'critical').length - secCriticals;
     const warnings = kept.filter((f: any) => f.severity === 'warning').length;
-    const score = Math.max(0, 100 - secCriticals * 15 - errors * 10 - otherCriticals * 3 - warnings * 2);
-    return { name: teamResult.name, score, findings: kept };
+
+    // Category-weighted scoring: apply team weight to penalty
+    const weight = TEAM_CATEGORY_WEIGHT[teamResult.name] ?? 1.0;
+    const rawPenalty = secCriticals * 15 + errors * 10 + otherCriticals * 3 + warnings * 2;
+    const score = Math.max(0, 100 - Math.round(rawPenalty * weight));
+
+    const elapsedMs = Date.now() - t0;
+    return { name: teamResult.name, score, findings: kept, _metrics: { preFP, postFP: kept.length, elapsedMs } };
   } catch {
-    return teamResult; // 필터 없으면 원본
+    const elapsedMs = Date.now() - t0;
+    return { ...teamResult, _metrics: { preFP, postFP: preFP, elapsedMs } }; // 필터 없으면 원본
   }
 }
 
 export async function runStaticPipeline(code: string, language: string): Promise<PipelineResult> {
-  const teams: TeamPipelineChunk[] = [];
+  const teams: FilteredTeamResult[] = [];
 
   // Team 1: Regex (표면 패턴 — 항상 실행, 1차 필터)
   teams.push(filterTeamFindings(runRegexTeam(code, language), code));
@@ -166,21 +206,88 @@ export async function runStaticPipeline(code: string, language: string): Promise
   // Team 8: Security Pattern
   teams.push(filterTeamFindings(runSecurityPatternCheck(code, language), code));
 
-  // ── Verdict 변환: score 기반 → level 기반 ──
-  const verdictTeams: PipelineResult['teams'] = teams.map((t: TeamPipelineChunk) => ({
+  // ── Collect team performance metrics ──
+  const teamMetrics: TeamPerformanceMetrics[] = teams.map((t: FilteredTeamResult) => ({
+    teamName: t.name,
+    findingsCount: t.findings.length,
+    dismissRate: t._metrics ? (t._metrics.preFP > 0 ? 1 - t._metrics.postFP / t._metrics.preFP : 0) : 0,
+    elapsedMs: t._metrics?.elapsedMs ?? 0,
+  }));
+
+  // ── Cross-team deduplication: same line+message from different teams → merge ──
+  // Build a global index of (line:ruleId) → detectors
+  const crossTeamIndex = new Map<string, { detectors: string[]; bestSeverity: string }>();
+  for (const t of teams) {
+    for (const f of t.findings) {
+      const key = `${f.line ?? 0}:${f.ruleId ?? f.message}`;
+      const existing = crossTeamIndex.get(key);
+      if (existing) {
+        if (!existing.detectors.includes(t.name)) existing.detectors.push(t.name);
+        // keep the most severe
+        const sevOrder = ['critical', 'error', 'warning', 'info'];
+        if (sevOrder.indexOf(f.severity ?? 'info') < sevOrder.indexOf(existing.bestSeverity)) {
+          existing.bestSeverity = f.severity ?? 'info';
+        }
+      } else {
+        crossTeamIndex.set(key, { detectors: [t.name], bestSeverity: f.severity ?? 'info' });
+      }
+    }
+  }
+
+  // ── Verdict 변환: score 기반 → level 기반 (with evidence accumulation + dedup) ──
+  const globalSeen = new Set<string>();
+  const verdictTeams: PipelineResult['teams'] = teams.map((t: FilteredTeamResult) => ({
     name: t.name,
     score: t.score,
     findings: t.findings.slice(0, 15).map((f: TeamRawFinding) => {
       const ruleId = f.ruleId ?? `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`;
+      const dedupKey = `${f.line ?? 0}:${ruleId}`;
+
+      // Cross-team dedup: skip if another team already emitted this finding
+      if (globalSeen.has(dedupKey)) return null;
+      globalSeen.add(dedupKey);
+
+      // Evidence accumulation: how many detectors flagged this?
+      const crossInfo = crossTeamIndex.get(dedupKey);
+      const detectors = crossInfo?.detectors ?? [t.name];
+      const multiDetector = detectors.length > 1;
+
+      // Enhanced confidence: multi-detector confirmation = higher confidence
+      let baseConfidence = mapToConfidence(f.severity ?? 'warning', f.message ?? '');
+      if (multiDetector && baseConfidence !== 'high') {
+        baseConfidence = baseConfidence === 'low' ? 'medium' : 'high';
+      }
+
+      // Enhanced mapToLevel: use confidence + severity + category
+      const category = ruleId.split('-')[0].toUpperCase();
+      const level = mapToLevelEnhanced(
+        f.severity ?? 'warning', ruleId, baseConfidence, category,
+      );
+
       return {
         ruleId,
         line: f.line ?? 0,
-        level: mapToLevel(f.severity ?? 'warning', f.message ?? '', ruleId),
-        confidence: mapToConfidence(f.severity ?? 'warning', f.message ?? ''),
+        level,
+        confidence: baseConfidence,
         message: f.message ?? String(f),
-      };
-    }),
+        detectors,
+      } as Finding;
+    }).filter(Boolean) as Finding[],
   }));
+
+  // ── Finding correlation: group related findings by root cause ──
+  const correlationGroups = correlateFindingGroups(verdictTeams.flatMap(t => t.findings));
+
+  // Apply correlation group keys back to findings
+  for (const group of correlationGroups) {
+    for (const t of verdictTeams) {
+      for (const f of t.findings) {
+        if (group.findingIds.includes(f.ruleId)) {
+          f.correlationGroup = group.groupKey;
+        }
+      }
+    }
+  }
 
   const allFindings = verdictTeams.flatMap(t => t.findings);
   const hardFail = allFindings.filter(f => f.level === 'hard-fail').length;
@@ -200,20 +307,21 @@ export async function runStaticPipeline(code: string, language: string): Promise
     score: avgScore,
     teams: verdictTeams,
     summary: { hardFail, reviewRequired, styleNote },
+    teamMetrics,
+    correlationGroups,
   };
 }
 
 // ── Level/Confidence 변환 헬퍼 — severity + ruleId 기반 (메시지 키워드 매칭은 자기참조 오탐 유발) ──
 function mapToLevel(severity: string, _message: string, ruleId?: string): FindingLevel {
   if (severity === 'critical') {
-    // Only SEC (security) and RTE (runtime error) categories warrant hard-fail
     const category = ruleId ? ruleId.split('-')[0].toUpperCase() : '';
     if (category === 'SEC' || category === 'RTE') return 'hard-fail';
-    return 'review-required'; // all other critical findings downgrade to review
+    return 'review-required';
   }
   if (severity === 'error') return 'review-required';
   if (severity === 'warning') return 'review-required';
-  return 'style-note'; // info 등
+  return 'style-note';
 }
 
 function mapToConfidence(severity: string, _message: string): 'high' | 'medium' | 'low' {
@@ -221,6 +329,73 @@ function mapToConfidence(severity: string, _message: string): 'high' | 'medium' 
   if (severity === 'error') return 'high';
   if (severity === 'warning') return 'medium';
   return 'low';
+}
+
+/**
+ * Enhanced level determination using confidence + severity + category.
+ * High-confidence SEC/RTE critical = hard-fail.
+ * Low-confidence error = downgrade to style-note.
+ * Medium-confidence warning in low-weight category (STL) = style-note.
+ */
+function mapToLevelEnhanced(
+  severity: string,
+  ruleId: string,
+  confidence: 'high' | 'medium' | 'low',
+  category: string,
+): FindingLevel {
+  // Hard-fail gate: only SEC/RTE criticals with medium+ confidence
+  if (severity === 'critical') {
+    if ((category === 'SEC' || category === 'RTE') && confidence !== 'low') return 'hard-fail';
+    if (confidence === 'high') return 'review-required';
+    return 'style-note'; // low-confidence critical in non-SEC/RTE = style-note
+  }
+
+  // Error with low confidence = demote to style-note
+  if (severity === 'error') {
+    if (confidence === 'low') return 'style-note';
+    return 'review-required';
+  }
+
+  // Warning: high-confidence or high-weight category = review, otherwise style
+  if (severity === 'warning') {
+    const weight = TEAM_CATEGORY_WEIGHT[ruleId.split('-')[0].toLowerCase()] ?? 1.0;
+    if (confidence === 'high' || weight >= 1.5) return 'review-required';
+    if (confidence === 'medium') return 'review-required';
+    return 'style-note';
+  }
+
+  return 'style-note';
+}
+
+// ── Finding correlation: group related findings that share a root cause ──
+const CORRELATION_RULES: Array<{ pattern: string[]; rootCause: string }> = [
+  { pattern: ['RTE-001', 'TYP-001'], rootCause: 'null-deref-missing-type-guard' },
+  { pattern: ['RTE-003', 'RTE-004'], rootCause: 'unsafe-property-access' },
+  { pattern: ['SEC-006', 'API-009'], rootCause: 'code-injection-surface' },
+  { pattern: ['ERR-001', 'ERR-002'], rootCause: 'insufficient-error-handling' },
+  { pattern: ['ASY-002', 'ASY-003'], rootCause: 'unguarded-async-flow' },
+  { pattern: ['PRF-002', 'PRF-004'], rootCause: 'sub-optimal-iteration' },
+  { pattern: ['SEC-009', 'SEC-010'], rootCause: 'hardcoded-secrets' },
+  { pattern: ['CMX-007', 'CMX-012'], rootCause: 'excessive-branching-complexity' },
+];
+
+function correlateFindingGroups(
+  findings: Finding[],
+): Array<{ groupKey: string; findingIds: string[]; rootCause: string }> {
+  const groups: Array<{ groupKey: string; findingIds: string[]; rootCause: string }> = [];
+  const ruleIds = new Set(findings.map(f => f.ruleId));
+
+  for (const rule of CORRELATION_RULES) {
+    const matched = rule.pattern.filter(p => ruleIds.has(p));
+    if (matched.length >= 2) {
+      groups.push({
+        groupKey: rule.rootCause,
+        findingIds: matched,
+        rootCause: rule.rootCause,
+      });
+    }
+  }
+  return groups;
 }
 
 // IDENTITY_SEAL: PART-1 | role=pipeline | inputs=code,language | outputs=PipelineResult

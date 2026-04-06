@@ -23,6 +23,19 @@ export interface FilteredFinding {
   evidence?: Array<{ engine: string; detail: string }>;
 }
 
+export interface SuppressEffectiveness {
+  ruleId: string;
+  suppressCount: number;
+  overSuppressive: boolean; // true if this rule suppresses >50% of all findings
+}
+
+export interface FilterStatistics {
+  stageCounts: { stage1: number; stage2: number; stage3: number; stage4: number; stage5: number; stage6: number };
+  topSuppressors: SuppressEffectiveness[];
+  topDismissedRules: Array<{ ruleId: string; count: number }>;
+  fpValidation?: { sampleSize: number; confirmedFP: number; suspectedTP: number };
+}
+
 export interface FilterResult {
   kept: FilteredFinding[];
   dismissed: Array<FilteredFinding & { dismissReason: string; stage: number }>;
@@ -33,9 +46,11 @@ export interface FilterResult {
     stage3: number; // 컨텍스트 필터
     stage4: number; // 자기참조 필터
     stage5: number; // 양품 suppress-fp 필터
+    stage6: number; // deduplication 필터
     kept: number;   // AI로 넘어가는 것
     boostDowngrades: number; // boost 신호로 confidence 하향 조정된 수
   };
+  filterStatistics?: FilterStatistics;
 }
 
 // ============================================================
@@ -149,12 +164,20 @@ const FP_CHECKLIST: FPRule[] = [
   {
     id: 'CTX-001',
     stage: 3,
-    description: '.catch(() => {}) — 의도적 best-effort 에러 무시',
+    description: '.catch with recovery logic — only suppress if catch body has actual recovery (not empty catch)',
     check: (f, ctx) => {
       if (f.line <= 0) return false;
       const lines = ctx.code.split('\n');
       const line = lines[f.line - 1] ?? '';
-      return /\.catch\s*\(\s*\(\s*\)\s*=>\s*\{/.test(line) || /\.catch\s*\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(line);
+      // Must have .catch pattern
+      if (!/\.catch\s*\(/.test(line)) return false;
+      // Read up to 5 lines after to check catch body content
+      const catchBody = lines.slice(f.line - 1, Math.min(lines.length, f.line + 4)).join(' ');
+      // Empty catch = NOT suppressed (this is a real issue)
+      if (/\.catch\s*\(\s*\(\s*\)\s*=>\s*\{\s*\}\s*\)/.test(catchBody)) return false;
+      // Has recovery logic: logging, fallback return, state reset, or re-throw
+      const hasRecovery = /console\.(warn|error|log)|logger\.|log\.|fallback|default|return\s|setState|dispatch|retry|throw\s/.test(catchBody);
+      return hasRecovery;
     },
   },
   {
@@ -614,10 +637,10 @@ function computeBoostedQualities(detectedPatterns: Set<string>): Set<IsoQuality>
   const qualityCounts: Record<IsoQuality, number> = {
     'Maintainability': 0, 'Reliability': 0, 'Security': 0, 'Performance': 0,
   };
-  for (const patternId of detectedPatterns) {
+  detectedPatterns.forEach(function(patternId) {
     const quality = BOOST_QUALITY_MAP[patternId];
     if (quality) qualityCounts[quality]++;
-  }
+  });
   const boosted = new Set<IsoQuality>();
   for (const [quality, count] of Object.entries(qualityCounts)) {
     if (count >= 2) boosted.add(quality as IsoQuality);
@@ -639,7 +662,7 @@ function downgradeConfidence(confidence: string): string {
 }
 
 // ============================================================
-// PART 4 — Context Builder
+// PART 4 — Context Builder + Line-Level Context
 // ============================================================
 
 function buildContext(filePath: string, code: string): FilterContext {
@@ -650,8 +673,31 @@ function buildContext(filePath: string, code: string): FilterContext {
   return { filePath, code, isCliTool, isTestFile, isRuleDefinition };
 }
 
+/**
+ * Read ±3 lines around a finding for line-level context judgment.
+ * Returns the surrounding code snippet for more accurate FP detection.
+ */
+function getLineContext(code: string, line: number, range: number = 3): string {
+  if (line <= 0) return '';
+  const lines = code.split('\n');
+  const start = Math.max(0, line - 1 - range);
+  const end = Math.min(lines.length, line + range);
+  return lines.slice(start, end).join('\n');
+}
+
+// ── Known FP / known TP patterns for spot-check validation ──
+const KNOWN_FP_PATTERNS: Array<{ ruleId: string; contextPattern: RegExp }> = [
+  { ruleId: 'SEC-006', contextPattern: /regex\s*:|\/.*\/[gimsuy]*\s*,|severity\s*:/ }, // eval in rule def
+  { ruleId: 'API-006', contextPattern: /^\s*\/\// },  // console.log in comments
+  { ruleId: 'TYP-001', contextPattern: /['"`].*any.*['"`]/ },  // 'any' in string literal
+];
+const KNOWN_TP_PATTERNS: Array<{ ruleId: string; contextPattern: RegExp }> = [
+  { ruleId: 'SEC-006', contextPattern: /eval\s*\(\s*\w+/ },  // eval with dynamic arg
+  { ruleId: 'SEC-009', contextPattern: /password\s*=\s*['"`][^'"]+['"`]/ },  // hardcoded pw
+];
+
 // ============================================================
-// PART 4 — Filter Runner
+// PART 4b — Filter Runner
 // ============================================================
 
 export function runFalsePositiveFilter(
@@ -664,16 +710,24 @@ export function runFalsePositiveFilter(
   const dismissed: FilterResult['dismissed'] = [];
   const stats = {
     total: findings.length,
-    stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0,
+    stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0, stage6: 0,
     kept: 0, boostDowngrades: 0,
   };
+
+  // ── Suppress effectiveness tracking ──
+  const suppressCounts = new Map<string, number>(); // ruleId/goodId → count
+  const dismissedByRule = new Map<string, number>(); // FP rule id → count
 
   // Stage 5a: 양품 패턴 감지 → suppress-fp (dismiss)
   const goodPatterns = detectGoodPatterns(code);
   const suppressedRuleIds = new Set<string>();
+  const suppressOrigin = new Map<string, string>(); // badId → goodId
   for (const [goodId, badIds] of Object.entries(SUPPRESS_MAP)) {
     if (goodPatterns.has(goodId)) {
-      for (const badId of badIds) suppressedRuleIds.add(badId);
+      for (const badId of badIds) {
+        suppressedRuleIds.add(badId);
+        suppressOrigin.set(badId, goodId);
+      }
     }
   }
 
@@ -685,14 +739,20 @@ export function runFalsePositiveFilter(
 
     // Stage 5a: 양품 패턴이 억제하는 ruleId (suppress-fp)
     if (finding.ruleId && suppressedRuleIds.has(finding.ruleId)) {
-      dismissed.push({ ...finding, dismissReason: `[GOOD-SUPPRESS] 양품 패턴이 존재하여 오탐 가능성 낮음`, stage: 5 });
+      const originGood = suppressOrigin.get(finding.ruleId) ?? 'unknown';
+      dismissed.push({ ...finding, dismissReason: `[GOOD-SUPPRESS] 양품 패턴(${originGood})이 존재하여 오탐 가능성 낮음`, stage: 5 });
       stats.stage5++;
+      suppressCounts.set(originGood, (suppressCounts.get(originGood) ?? 0) + 1);
       isDismissed = true;
     }
 
     if (!isDismissed) for (const rule of FP_CHECKLIST) {
-      if (rule.check(finding, context)) {
+      // Enhanced: use line-level context for more accurate judgment
+      const lineCtx = getLineContext(code, finding.line, 3);
+      const findingWithContext = { ...finding, _lineContext: lineCtx };
+      if (rule.check(findingWithContext, context)) {
         dismissed.push({ ...finding, dismissReason: `[${rule.id}] ${rule.description}`, stage: rule.stage });
+        dismissedByRule.set(rule.id, (dismissedByRule.get(rule.id) ?? 0) + 1);
         if (rule.stage === 1) stats.stage1++;
         else if (rule.stage === 2) stats.stage2++;
         else if (rule.stage === 3) stats.stage3++;
@@ -724,7 +784,6 @@ export function runFalsePositiveFilter(
           finding.confidence = downgradeConfidence(finding.confidence);
           if (before !== finding.confidence) {
             stats.boostDowngrades++;
-            // evidence에 boost 적용 기록 추가
             if (!finding.evidence) finding.evidence = [];
             finding.evidence.push({
               engine: 'boost-signal',
@@ -738,8 +797,85 @@ export function runFalsePositiveFilter(
     }
   }
 
-  stats.kept = kept.length;
-  return { kept, dismissed, stats };
+  // ── Stage 6: Deduplication — same message at same line from different engines = merge ──
+  const dedupMap = new Map<string, FilteredFinding>();
+  const deduped: FilteredFinding[] = [];
+  for (const f of kept) {
+    const key = `${f.line}:${f.message}`;
+    const existing = dedupMap.get(key);
+    if (existing) {
+      // Merge: keep higher severity, accumulate evidence
+      stats.stage6++;
+      const sevOrder = ['critical', 'error', 'warning', 'info'];
+      if (sevOrder.indexOf(f.severity) < sevOrder.indexOf(existing.severity)) {
+        existing.severity = f.severity;
+      }
+      // Merge confidence: keep the higher one
+      const confOrder = ['high', 'medium', 'low'];
+      if (confOrder.indexOf(f.confidence) < confOrder.indexOf(existing.confidence)) {
+        existing.confidence = f.confidence;
+      }
+      // Accumulate evidence
+      if (f.evidence) {
+        if (!existing.evidence) existing.evidence = [];
+        existing.evidence.push(...f.evidence);
+      }
+      if (!existing.evidence) existing.evidence = [];
+      existing.evidence.push({ engine: 'dedup-merge', detail: `merged from ruleId=${f.ruleId}` });
+    } else {
+      dedupMap.set(key, f);
+      deduped.push(f);
+    }
+  }
+
+  // ── Build filter statistics ──
+  const topSuppressors: SuppressEffectiveness[] = [];
+  Array.from(suppressCounts.entries()).forEach(function(entry) {
+    topSuppressors.push({
+      ruleId: entry[0],
+      suppressCount: entry[1],
+      overSuppressive: entry[1] > findings.length * 0.5, // >50% = over-suppressive
+    });
+  });
+  topSuppressors.sort(function(a, b) { return b.suppressCount - a.suppressCount; });
+
+  const topDismissedRules: Array<{ ruleId: string; count: number }> = [];
+  Array.from(dismissedByRule.entries()).forEach(function(entry) {
+    topDismissedRules.push({ ruleId: entry[0], count: entry[1] });
+  });
+  topDismissedRules.sort(function(a, b) { return b.count - a.count; });
+
+  // ── FP Validation: spot-check sample of dismissed findings against known-good/bad list ──
+  let fpValidation: FilterStatistics['fpValidation'] = undefined;
+  if (dismissed.length > 0) {
+    const sampleSize = Math.min(dismissed.length, 10);
+    const sample = dismissed.slice(0, sampleSize);
+    let confirmedFP = 0;
+    let suspectedTP = 0;
+    for (const d of sample) {
+      const lineCtx = getLineContext(code, d.line, 3);
+      // Check against known FP patterns
+      const isFP = KNOWN_FP_PATTERNS.some(p => p.ruleId === d.ruleId && p.contextPattern.test(lineCtx));
+      // Check against known TP patterns
+      const isTP = KNOWN_TP_PATTERNS.some(p => p.ruleId === d.ruleId && p.contextPattern.test(lineCtx));
+      if (isFP) confirmedFP++;
+      if (isTP) suspectedTP++;
+    }
+    fpValidation = { sampleSize, confirmedFP, suspectedTP };
+  }
+
+  const filterStatistics: FilterStatistics = {
+    stageCounts: {
+      stage1: stats.stage1, stage2: stats.stage2, stage3: stats.stage3,
+      stage4: stats.stage4, stage5: stats.stage5, stage6: stats.stage6,
+    },
+    topSuppressors: topSuppressors.slice(0, 5),
+    topDismissedRules: topDismissedRules.slice(0, 5),
+    fpValidation,
+  };
+
+  stats.kept = deduped.length;
+  return { kept: deduped, dismissed, stats, filterStatistics };
 }
 
 // ============================================================
@@ -757,8 +893,31 @@ export function printFilterSummary(result: FilterResult): string {
   if (result.stats.stage4 > 0) lines.push(`    Stage 4 자기참조: ${result.stats.stage4}건 (규칙 코드)`);
   if (result.stats.stage5 > 0) lines.push(`    Stage 5a suppress: ${result.stats.stage5}건 (양품 패턴 억제)`);
   if (result.stats.boostDowngrades > 0) lines.push(`    Stage 5b boost: ${result.stats.boostDowngrades}건 confidence 하향 (양품 차원 건전성)`);
+  if (result.stats.stage6 > 0) lines.push(`    Stage 6 dedup: ${result.stats.stage6}건 (중복 병합)`);
+
+  // Suppress effectiveness warnings
+  if (result.filterStatistics) {
+    const overSuppressive = result.filterStatistics.topSuppressors.filter(s => s.overSuppressive);
+    if (overSuppressive.length > 0) {
+      lines.push(`    [WARN] 과다 억제 규칙: ${overSuppressive.map(s => `${s.ruleId}(${s.suppressCount}건)`).join(', ')}`);
+    }
+    // FP validation results
+    if (result.filterStatistics.fpValidation && result.filterStatistics.fpValidation.suspectedTP > 0) {
+      const v = result.filterStatistics.fpValidation;
+      lines.push(`    [WARN] FP 검증: ${v.sampleSize}건 샘플 중 ${v.suspectedTP}건이 실제 양성(TP) 의심`);
+    }
+  }
 
   return lines.join('\n');
+}
+
+/**
+ * Export filter statistics for external analysis.
+ * Provides stage-by-stage counts, top suppressors, top dismissed rules,
+ * and FP validation results.
+ */
+export function exportFilterStatistics(result: FilterResult): FilterStatistics | undefined {
+  return result.filterStatistics;
 }
 
 // IDENTITY_SEAL: PART-5 | role=fp-filter | inputs=findings,filePath,code | outputs=FilterResult

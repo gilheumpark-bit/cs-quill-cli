@@ -192,10 +192,193 @@ export function applyConflictResolutions(
   return true;
 }
 
+// Resolve all conflicts in a file using a given strategy and write back
+export async function resolveFileConflicts(
+  rootPath: string,
+  fileInfo: ConflictInfo,
+  strategy: ResolveStrategy['type'],
+): Promise<{ resolved: number; file: string }> {
+  const resolutions = new Map<number, string>();
+
+  for (const conflict of fileInfo.conflicts) {
+    let resolved: string;
+    if (strategy === 'ai') {
+      const fullPath = join(rootPath, fileInfo.file);
+      const context = existsSync(fullPath) ? readFileSync(fullPath, 'utf-8').slice(0, 2000) : '';
+      resolved = await resolveConflictWithAI(conflict, context);
+    } else {
+      resolved = resolveConflictRule(conflict, strategy);
+    }
+    resolutions.set(conflict.startLine, resolved);
+  }
+
+  const success = applyConflictResolutions(rootPath, fileInfo.file, resolutions);
+  return { resolved: success ? resolutions.size : 0, file: fileInfo.file };
+}
+
+// Resolve all conflicting files at once
+export async function resolveAllConflicts(
+  rootPath: string,
+  strategy: ResolveStrategy['type'],
+): Promise<Array<{ file: string; resolved: number }>> {
+  const allConflicts = detectConflicts(rootPath);
+  const results: Array<{ file: string; resolved: number }> = [];
+
+  for (const fileInfo of allConflicts) {
+    const result = await resolveFileConflicts(rootPath, fileInfo, strategy);
+    results.push(result);
+  }
+
+  return results;
+}
+
 // IDENTITY_SEAL: PART-2 | role=resolver | inputs=conflict,strategy | outputs=string
 
 // ============================================================
-// PART 3 — Smart Commit Message
+// PART 3 — Git Blame Integration
+// ============================================================
+
+export interface BlameInfo {
+  line: number;
+  hash: string;
+  author: string;
+  date: string;
+  content: string;
+}
+
+export interface BlameStats {
+  file: string;
+  lines: BlameInfo[];
+  authorDistribution: Array<{ author: string; lines: number; percentage: number }>;
+  ageDistribution: { recent: number; moderate: number; old: number };
+  totalLines: number;
+}
+
+export function getFileBlame(rootPath: string, filePath: string): BlameStats | null {
+  try {
+    const output = execSync(
+      `git blame --porcelain "${filePath}" 2>/dev/null`,
+      { cwd: rootPath, encoding: 'utf-8', stdio: 'pipe', maxBuffer: 5 * 1024 * 1024 },
+    );
+
+    const lines: BlameInfo[] = [];
+    const authorCounts = new Map<string, number>();
+
+    const chunks = output.split(/^([0-9a-f]{40})/gm).filter(Boolean);
+    let currentHash = '';
+    let currentAuthor = '';
+    let currentDate = '';
+    let lineNum = 0;
+
+    for (const chunk of chunks) {
+      if (/^[0-9a-f]{40}$/.test(chunk)) {
+        currentHash = chunk.slice(0, 8);
+        continue;
+      }
+
+      const authorMatch = chunk.match(/^author (.+)$/m);
+      const dateMatch = chunk.match(/^author-time (\d+)$/m);
+      const contentMatch = chunk.match(/^\t(.*)$/m);
+
+      if (authorMatch) currentAuthor = authorMatch[1];
+      if (dateMatch) currentDate = new Date(parseInt(dateMatch[1], 10) * 1000).toISOString().slice(0, 10);
+
+      const lineNumMatch = chunk.match(/^([0-9a-f]+ )?(\d+) (\d+)/);
+      if (lineNumMatch) lineNum = parseInt(lineNumMatch[3], 10);
+
+      if (contentMatch !== null) {
+        lines.push({
+          line: lineNum,
+          hash: currentHash,
+          author: currentAuthor,
+          date: currentDate,
+          content: contentMatch[1],
+        });
+        authorCounts.set(currentAuthor, (authorCounts.get(currentAuthor) ?? 0) + 1);
+      }
+    }
+
+    const totalLines = lines.length || 1;
+
+    // Author distribution
+    const authorDistribution = [...authorCounts.entries()]
+      .map(([author, count]) => ({
+        author,
+        lines: count,
+        percentage: Math.round((count / totalLines) * 100),
+      }))
+      .sort((a, b) => b.lines - a.lines);
+
+    // Age distribution
+    const now = Date.now();
+    const thirtyDays = 30 * 86400000;
+    const ninetyDays = 90 * 86400000;
+    let recent = 0;
+    let moderate = 0;
+    let old = 0;
+
+    for (const bl of lines) {
+      const age = now - new Date(bl.date).getTime();
+      if (age < thirtyDays) recent++;
+      else if (age < ninetyDays) moderate++;
+      else old++;
+    }
+
+    return {
+      file: filePath,
+      lines,
+      authorDistribution,
+      ageDistribution: { recent, moderate, old },
+      totalLines,
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function getBlameForLineRange(
+  rootPath: string,
+  filePath: string,
+  startLine: number,
+  endLine: number,
+): BlameInfo[] {
+  try {
+    const output = execSync(
+      `git blame -L ${startLine},${endLine} --porcelain "${filePath}" 2>/dev/null`,
+      { cwd: rootPath, encoding: 'utf-8', stdio: 'pipe' },
+    );
+
+    const results: BlameInfo[] = [];
+    const blameLines = output.split('\n');
+    let hash = '';
+    let author = '';
+    let date = '';
+    let lineNum = startLine;
+
+    for (const line of blameLines) {
+      if (/^[0-9a-f]{40}/.test(line)) {
+        hash = line.slice(0, 8);
+        const parts = line.split(' ');
+        if (parts[2]) lineNum = parseInt(parts[2], 10);
+      } else if (line.startsWith('author ')) {
+        author = line.slice(7);
+      } else if (line.startsWith('author-time ')) {
+        date = new Date(parseInt(line.slice(12), 10) * 1000).toISOString().slice(0, 10);
+      } else if (line.startsWith('\t')) {
+        results.push({ line: lineNum, hash, author, date, content: line.slice(1) });
+      }
+    }
+
+    return results;
+  } catch {
+    return [];
+  }
+}
+
+// IDENTITY_SEAL: PART-3 | role=git-blame | inputs=rootPath,filePath | outputs=BlameStats
+
+// ============================================================
+// PART 4 — Smart Commit Message
 // ============================================================
 
 export function generateCommitMessage(rootPath: string): string {
@@ -239,10 +422,10 @@ export function generateCommitMessage(rootPath: string): string {
   }
 }
 
-// IDENTITY_SEAL: PART-3 | role=commit-msg | inputs=rootPath | outputs=string
+// IDENTITY_SEAL: PART-4 | role=commit-msg | inputs=rootPath | outputs=string
 
 // ============================================================
-// PART 4 — Branch Strategy Helper
+// PART 5 — Branch Strategy Helper
 // ============================================================
 
 export function suggestBranchName(description: string): string {
@@ -281,10 +464,10 @@ export function getStaleLocalBranches(rootPath: string, daysSince: number = 30):
   }
 }
 
-// IDENTITY_SEAL: PART-4 | role=branch | inputs=description | outputs=branchName
+// IDENTITY_SEAL: PART-5 | role=branch | inputs=description | outputs=branchName
 
 // ============================================================
-// PART 5 — Git Stats (리포지토리 건강도)
+// PART 6 — Git Stats (리포지토리 건강도)
 // ============================================================
 
 export function getRepoHealth(rootPath: string): {
@@ -318,10 +501,10 @@ export function getRepoHealth(rootPath: string): {
   }
 }
 
-// IDENTITY_SEAL: PART-5 | role=repo-health | inputs=rootPath | outputs=health
+// IDENTITY_SEAL: PART-6 | role=repo-health | inputs=rootPath | outputs=health
 
 // ============================================================
-// PART 6 — Commit Frequency Analytics
+// PART 7 — Commit Frequency Analytics
 // ============================================================
 
 export function getCommitFrequency(rootPath: string, days: number = 90): {
@@ -376,10 +559,10 @@ export function getCommitFrequency(rootPath: string, days: number = 90): {
   }
 }
 
-// IDENTITY_SEAL: PART-6 | role=commit-frequency | inputs=rootPath | outputs=frequency
+// IDENTITY_SEAL: PART-7 | role=commit-frequency | inputs=rootPath | outputs=frequency
 
 // ============================================================
-// PART 7 — Hot Files (Most Changed Files)
+// PART 8 — Hot Files (Most Changed Files)
 // ============================================================
 
 export function getHotFiles(rootPath: string, days: number = 60, limit: number = 15): Array<{
@@ -430,10 +613,10 @@ export function getHotFiles(rootPath: string, days: number = 60, limit: number =
   }
 }
 
-// IDENTITY_SEAL: PART-7 | role=hot-files | inputs=rootPath | outputs=hotFiles
+// IDENTITY_SEAL: PART-8 | role=hot-files | inputs=rootPath | outputs=hotFiles
 
 // ============================================================
-// PART 8 — Contributor Stats
+// PART 9 — Contributor Stats
 // ============================================================
 
 export function getContributorStats(rootPath: string, days: number = 90): Array<{
@@ -511,10 +694,10 @@ export function getContributorStats(rootPath: string, days: number = 90): Array<
   }
 }
 
-// IDENTITY_SEAL: PART-8 | role=contributor-stats | inputs=rootPath | outputs=contributors
+// IDENTITY_SEAL: PART-9 | role=contributor-stats | inputs=rootPath | outputs=contributors
 
 // ============================================================
-// PART 9 — Branch Age Warnings
+// PART 10 — Branch Age Warnings
 // ============================================================
 
 export function getBranchAgeWarnings(rootPath: string): Array<{
@@ -587,4 +770,121 @@ export function getBranchAgeWarnings(rootPath: string): Array<{
   }
 }
 
-// IDENTITY_SEAL: PART-9 | role=branch-age | inputs=rootPath | outputs=branchWarnings
+// IDENTITY_SEAL: PART-10 | role=branch-age | inputs=rootPath | outputs=branchWarnings
+
+// ============================================================
+// PART 11 — Branch Analytics Summary
+// ============================================================
+
+export interface BranchAnalytics {
+  totalBranches: number;
+  activeBranches: number;
+  staleBranches: number;
+  mergedBranches: number;
+  unmergedBranches: number;
+  defaultBranch: string;
+  branchDetails: Array<{
+    name: string;
+    isMerged: boolean;
+    ageInDays: number;
+    lastAuthor: string;
+    ahead: number;
+    behind: number;
+  }>;
+  recommendations: string[];
+}
+
+export function getBranchAnalytics(rootPath: string): BranchAnalytics {
+  const result: BranchAnalytics = {
+    totalBranches: 0,
+    activeBranches: 0,
+    staleBranches: 0,
+    mergedBranches: 0,
+    unmergedBranches: 0,
+    defaultBranch: 'main',
+    branchDetails: [],
+    recommendations: [],
+  };
+
+  try {
+    // Determine default branch
+    try {
+      result.defaultBranch = execSync('git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null', {
+        cwd: rootPath, encoding: 'utf-8', stdio: 'pipe',
+      }).trim().replace('refs/remotes/origin/', '');
+    } catch {
+      try {
+        execSync('git rev-parse --verify main 2>/dev/null', { cwd: rootPath, stdio: 'pipe' });
+        result.defaultBranch = 'main';
+      } catch {
+        result.defaultBranch = 'master';
+      }
+    }
+
+    // Get merged branches
+    const mergedOutput = execSync(
+      `git branch --merged ${result.defaultBranch} 2>/dev/null`,
+      { cwd: rootPath, encoding: 'utf-8', stdio: 'pipe' },
+    );
+    const mergedBranches = new Set(
+      mergedOutput.split('\n').map(b => b.trim().replace(/^\*\s*/, '')).filter(Boolean),
+    );
+
+    // Get all branches with details
+    const output = execSync(
+      'git for-each-ref --sort=-committerdate --format="%(refname:short)|%(committerdate:unix)|%(authorname)" refs/heads/ 2>/dev/null',
+      { cwd: rootPath, encoding: 'utf-8', stdio: 'pipe' },
+    );
+
+    const now = Date.now() / 1000;
+
+    for (const line of output.split('\n').filter(Boolean)) {
+      const [name, timestamp, author] = line.split('|');
+      if (name === result.defaultBranch) continue;
+
+      result.totalBranches++;
+
+      const ageInDays = Math.floor((now - parseInt(timestamp, 10)) / 86400);
+      const isMerged = mergedBranches.has(name);
+
+      // Get ahead/behind
+      let ahead = 0;
+      let behind = 0;
+      try {
+        const ab = execSync(
+          `git rev-list --left-right --count "${result.defaultBranch}...${name}" 2>/dev/null`,
+          { cwd: rootPath, encoding: 'utf-8', stdio: 'pipe' },
+        ).trim();
+        const parts = ab.split('\t').map(Number);
+        behind = parts[0] ?? 0;
+        ahead = parts[1] ?? 0;
+      } catch { /* skip */ }
+
+      if (isMerged) result.mergedBranches++;
+      else result.unmergedBranches++;
+
+      if (ageInDays > 30) result.staleBranches++;
+      else result.activeBranches++;
+
+      result.branchDetails.push({ name, isMerged, ageInDays, lastAuthor: author, ahead, behind });
+    }
+
+    // Recommendations
+    if (result.mergedBranches > 3) {
+      result.recommendations.push(`${result.mergedBranches}개 이미 병합된 브랜치 정리 가능`);
+    }
+    if (result.staleBranches > 5) {
+      result.recommendations.push(`${result.staleBranches}개 미활동 브랜치 (30일+) — 정리 검토 필요`);
+    }
+    const divergent = result.branchDetails.filter(b => b.behind > 50 && !b.isMerged);
+    if (divergent.length > 0) {
+      result.recommendations.push(`${divergent.length}개 브랜치가 ${result.defaultBranch}과 크게 분기됨 — 리베이스 권장`);
+    }
+
+    return result;
+  } catch {
+    return result;
+  }
+}
+
+// IDENTITY_SEAL: PART-11 | role=branch-analytics | inputs=rootPath | outputs=BranchAnalytics
