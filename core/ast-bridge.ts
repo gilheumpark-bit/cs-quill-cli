@@ -268,14 +268,46 @@ export async function runEnhancedPipeline(
   // Deduplicate: same line + same team = keep higher confidence
   const deduped = deduplicateFindings(findings);
 
+  // ── 정수 필터 적용 (점수 계산 전에 확정 오탐 제거) ──
+  let filtered = deduped;
+  try {
+    const { runFalsePositiveFilter } = require('./false-positive-filter');
+    const mapped = deduped.map(f => ({
+      ruleId: (f as any).ruleId ?? `${f.engine}/${f.team}`,
+      line: f.line,
+      message: f.message,
+      severity: f.severity,
+      confidence: String(f.confidence),
+    }));
+    const fpResult = runFalsePositiveFilter(mapped, fileName, code);
+    // 필터 통과분만 점수 계산에 사용
+    const keptSet = new Set(fpResult.kept.map((k: any) => `${k.line}:${k.message}`));
+    filtered = deduped.filter(f => keptSet.has(`${f.line}:${f.message}`));
+  } catch { /* 필터 없으면 원본 사용 */ }
+
+  // ── 양품 패턴 부스트 ──
+  let goodPatternBoost = 0;
+  try {
+    const { detectGoodPatterns } = require('./false-positive-filter');
+    if (typeof detectGoodPatterns === 'function') {
+      const detected = detectGoodPatterns(code);
+      // 양품 패턴당 1점 부스트, 최대 10점
+      goodPatternBoost = Math.min(detected.size * 1, 10);
+    }
+  } catch { /* 양품 감지 없으면 skip */ }
+
   // Score calculation — 감점 캡 적용 (최대 50점 감점)
-  const astFindingCount = deduped.filter(f => f.engine !== 'regex').length;
-  const criticalCount = Math.min(deduped.filter(f => f.severity === 'critical').length, 3);
-  const errorCount = Math.min(deduped.filter(f => f.severity === 'error').length, 5);
-  const warningCount = Math.min(deduped.filter(f => f.severity === 'warning').length, 10);
+  const astFindingCount = filtered.filter(f => f.engine !== 'regex').length;
+  const criticalCount = Math.min(filtered.filter(f => f.severity === 'critical').length, 3);
+  const errorCount = Math.min(filtered.filter(f => f.severity === 'error').length, 5);
+  const warningCount = Math.min(filtered.filter(f => f.severity === 'warning').length, 10);
+
+  if (process.env.CS_DEBUG) {
+    console.error(`  [DEBUG] ast-bridge score: filtered=${filtered.length} crit=${criticalCount} err=${errorCount} warn=${warningCount} boost=${goodPatternBoost} regexScore=${regexResult?.score}`);
+  }
 
   const penalty = criticalCount * 10 + errorCount * 5 + warningCount * 1;
-  const astScore = Math.max(50, 100 - Math.min(penalty, 50));
+  const astScore = Math.min(100, Math.max(50, 100 - Math.min(penalty, 50) + goodPatternBoost));
   const regexScore = regexResult?.score ?? 50;
   const combinedScore = Math.round(regexScore * 0.3 + astScore * 0.7);
 
@@ -285,8 +317,8 @@ export async function runEnhancedPipeline(
     combinedScore,
     regexFindings: regexFindingCount,
     astFindings: astFindingCount,
-    totalFindings: deduped.length,
-    findings: deduped,
+    totalFindings: filtered.length,
+    findings: filtered,
     engines,
   };
 }

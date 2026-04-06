@@ -182,9 +182,10 @@ export async function runStaticPipeline(code: string, language: string): Promise
 
   const verdict: PipelineResult['verdict'] = hardFail > 0 ? 'fail' : reviewRequired > 0 ? 'review' : 'pass';
 
-  // 하위 호환 score
+  // 하위 호환 score — 로그 스케일 감점 (대량 findings에도 점수 바닥 방지)
+  const reviewPenaltyPB = Math.min(35, Math.round(Math.log2(reviewRequired + 1) * 5));
   const avgScore = verdict === 'pass' ? 100
-    : verdict === 'review' ? Math.max(60, 100 - reviewRequired * 3)
+    : verdict === 'review' ? Math.max(60, 100 - reviewPenaltyPB)
     : Math.max(0, 50 - hardFail * 10);
 
   return {

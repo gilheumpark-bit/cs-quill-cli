@@ -187,10 +187,14 @@ export async function orchestrateVerify(
       })
       .filter((f): f is NonNullable<typeof f> => f !== null);
 
-    // 점수 재계산: 오탐 제거 후 남은 findings 기반
+    // 점수 재계산: 오탐 제거 후 남은 findings 기반 — 로그 스케일 감점
     const errorCount = teamFindings.filter(f => f.severity === 'error' || f.severity === 'critical').length;
     const warnCount = teamFindings.filter(f => f.severity === 'warning' || f.severity === 'medium').length;
-    const score = Math.max(0, Math.min(100, 100 - errorCount * 20 - warnCount * 5));
+    // 기존 공식(error*20, warn*5)은 findings 3개만으로 점수가 0이 됨.
+    // 로그 스케일로 감점 완화: error당 최대 10점, warning당 최대 3점
+    const errorPenalty = Math.min(errorCount * 10, 30);
+    const warnPenalty = Math.min(warnCount * 3, 20);
+    const score = Math.max(0, Math.min(100, 100 - errorPenalty - warnPenalty));
 
     return { name: team.name, score, findings: teamFindings };
   });

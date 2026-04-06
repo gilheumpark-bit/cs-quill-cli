@@ -263,8 +263,23 @@ const FP_CHECKLIST: FPRule[] = [
   {
     id: 'SELF-001',
     stage: 4,
-    description: '검증 엔진 소스에서 eval/security 등 규칙 문자열',
-    check: (f, ctx) => ctx.isRuleDefinition,
+    description: '검증 엔진 소스에서 규칙 문자열 자기참조 (패턴 매칭/정규식/규칙 ID)',
+    check: (f, ctx) => {
+      if (!ctx.isRuleDefinition) return false;
+      // 규칙 코드에서 자기참조 오탐 발생 가능 패턴:
+      // - 보안/위험 키워드가 정규식 안에 등장
+      // - API hallucination이 규칙 코드 자체를 검사
+      // - 규칙 ID(API-001 등)가 문자열에 등장
+      const selfRefPatterns = /eval|security|xss|injection|secret|credential|password|hallucination|console\.log|process\.exit|API-\d{3}|규칙|위반.*의심/i;
+      if (selfRefPatterns.test(f.message)) return true;
+      // 규칙 정의 라인의 string literal/regex 안에서 발생한 finding
+      if (f.line > 0) {
+        const lines = ctx.code.split('\n');
+        const line = lines[f.line - 1] ?? '';
+        if (/^\s*("|'|`|\/\/)/.test(line.trim()) || /\.test\(|RegExp|ruleId/.test(line)) return true;
+      }
+      return false;
+    },
   },
   {
     id: 'SELF-002',
