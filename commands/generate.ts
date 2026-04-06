@@ -837,4 +837,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
   console.log('\n  Done!\n');
 }
 
+// Export internal helpers for testing
+export { generateSealHeader, generateSealFooter, mergeGeneratedParts, deduplicateImports, validateGeneratedCode };
+
 // IDENTITY_SEAL: PART-4 | role=main-generate | inputs=prompt,opts | outputs=file+receipt

@@ -599,4 +599,7 @@ const BADGES_LIST = [
   { id: 'streak-5', icon: '🎯' }, { id: 'streak-10', icon: '💎' }, { id: 'centurion', icon: '💯' }, { id: 'perfect', icon: '🌟' },
 ];
 
+// Export internal helpers for testing
+export { computeASTMetrics, scoreASTMetrics };
+
 // IDENTITY_SEAL: PART-4 | role=constants | inputs=none | outputs=BADGES_LIST

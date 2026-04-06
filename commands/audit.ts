@@ -390,4 +390,7 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
   }
 }
 
+// Export internal helpers for testing
+export { aggregateByCategory, buildSarifOutput, saveAuditSnapshot, loadPreviousAudit, printTrendComparison };
+
 // IDENTITY_SEAL: PART-5 | role=audit-runner | inputs=opts | outputs=console

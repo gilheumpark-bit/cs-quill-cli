@@ -874,4 +874,7 @@ export async function runStress(targetPath: string, opts: StressOptions): Promis
   console.log(`\n  Completed: ${duration}ms\n`);
 }
 
+// Export internal helpers for testing
+export { computeStaticMetrics, runCPUStress, renderLatencyChart };
+
 // IDENTITY_SEAL: PART-9 | role=stress-runner | inputs=path,opts | outputs=console
