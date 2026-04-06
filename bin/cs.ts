@@ -510,6 +510,29 @@ program
   .option('--no-color', '색상 비활성화')
   .option('--lang <lang>', '출력 언어 (ko|en|ja|zh)');
 
+// ============================================================
+// PART 9 — Splash Banner (마스코트)
+// ============================================================
+
+const QUILL_MASCOT = `
+\x1b[38;5;214m       /\\_/\\\x1b[0m
+\x1b[38;5;214m      ( o.o )\x1b[0m  \x1b[1;36mCS Quill\x1b[0m 🦔  v${VERSION}
+\x1b[38;5;208m       > ^ <\x1b[0m   \x1b[2mCode Quality Guardian\x1b[0m
+\x1b[38;5;202m     /||||||\\\\\x1b[0m
+\x1b[0m
+   \x1b[33m436 Rules\x1b[0m   불량 224 + 양품 212
+   \x1b[33m4-Layer\x1b[0m    Pre-filter → AST → TypeChecker → esquery
+   \x1b[33mAI Judge\x1b[0m   team-lead → cross-judge
+   \x1b[33m정수필터\x1b[0m    5-stage false-positive filter
+`;
+
+// 인자 없이 실행하거나 --help 일 때만 마스코트 출력
+const rawArgs = process.argv.slice(2);
+const showSplash = rawArgs.length === 0 || rawArgs[0] === '--help' || rawArgs[0] === '-h';
+if (showSplash) {
+  console.log(QUILL_MASCOT);
+}
+
 // 다국어 alias 처리: "cs 생성" → "cs generate", "cs 검증" → "cs verify"
 const args = process.argv.slice(2);
 if (args.length > 0) {
