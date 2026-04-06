@@ -1,0 +1,24 @@
+{
+  "id": "cs-v-mnmi9zyo",
+  "timestamp": 1775438559312,
+  "codeHash": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "stability",
+        "score": 49,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      }
+    ],
+    "overallScore": 100,
+    "overallStatus": "pass"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "f24ac792d1d3c20d3343707b2846ed3fd479551952fc130c8e9e9ec4f6fe7939"
+}
