@@ -123,9 +123,18 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const threshold = Math.max(0, Math.min(100, parseInt(opts.threshold, 10) || 77));
   const startTime = performance.now();
   const { printHeader, printScore, printSection, icons, colors } = require('../core/terminal-compat');
+  const isJson = opts.format === 'json';
+  // JSON 모드: 모든 진행률/배너를 stderr로 → stdout에는 순수 JSON만
+  const _origLog = console.log;
+  if (isJson) {
+    console.log = (...args: any[]) => process.stderr.write(args.join(' ') + '\n');
+  }
+  const log = console.log;
 
-  printHeader(opts.diff ? '증분 검증 (git diff)' : '8팀 검증');
-  console.log('');
+  if (!isJson) {
+    printHeader(opts.diff ? '증분 검증 (git diff)' : '8팀 검증');
+    console.log('');
+  }
 
   // Discover files — --diff 모드: git 변경 파일만
   let files: SourceFile[];
@@ -153,10 +162,10 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     console.log(`  ${icons.warn}  검증할 파일이 없습니다.`);
     return;
   }
-  if (!opts.diff) console.log(`  ${icons.folder} ${files.length}개 파일 발견`);
+  if (!opts.diff) log(`  ${icons.folder} ${files.length}개 파일 발견`);
   const useParallel = opts.parallel && files.length > 3;
-  if (useParallel) console.log(`  ${icons.rocket} 워커풀 병렬 모드 (${Math.min(files.length, 4)} workers)`);
-  console.log('');
+  if (useParallel) log(`  ${icons.rocket} 워커풀 병렬 모드 (${Math.min(files.length, 4)} workers)`);
+  log('');
 
   // Run pipeline on each file — try enhanced (AST) first, fallback to regex
   let useEnhanced = true;
@@ -200,7 +209,8 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
         const totalFindingCount = enhanced.findings.length || 1;
         for (const [name, data] of teamMap) {
           const teamRatio = data.findings.length / totalFindingCount;
-          const teamScore = Math.max(0, Math.round(enhanced.combinedScore * (1 - teamRatio * 0.5)));
+          // teamRatio 감점 축소: 0.5 → 0.3 (개별 팀이 과도하게 감점되지 않도록)
+          const teamScore = Math.max(0, Math.round(enhanced.combinedScore * (1 - teamRatio * 0.3)));
           result.teams.push({ name, score: teamScore, findings: data.findings.map(f => f.message) });
         }
         // details에 severity 포함해서 verdict 집계에 사용
@@ -209,7 +219,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
         }));
         return result;
       } catch (enhErr) {
-        if (process.env.CS_DEBUG) console.error(`  [DEBUG] enhanced failed for ${file.relativePath}:`, (enhErr as Error).message?.slice(0, 100));
+        if (process.env.CS_DEBUG) console.error(`  [DEBUG] enhanced FAILED for ${file.relativePath}:`, (enhErr as Error).message?.slice(0, 200));
         return await runStaticPipeline(file.content, file.language);
       }
     }
@@ -254,7 +264,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   {
     for (let fi = 0; fi < files.length; fi++) {
       const file = files[fi];
-      process.stdout.write(`\r  ${icons.clock} ${fi + 1}/${files.length} 파일 검증 중...`);
+      (isJson ? process.stderr : process.stdout).write(`\r  ${icons.clock} ${fi + 1}/${files.length} 파일 검증 중...`);
       const result = await verifyOneFile(file);
 
       // enhanced _details 수집
@@ -478,8 +488,15 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   }
 
   const overallVerdict = allHardFail > 0 ? 'FAIL' : allReview > 5 ? 'REVIEW' : 'PASS';
+  // 양품 패턴 부스트: 패턴당 0.5점, 최대 10점 (실제 코드 품질 반영)
+  const goodBoost = Math.min(Math.round(totalGoodPatterns * 0.5), 10);
+  // 파일당 findings 밀도로 정규화 — 파일 수가 많을수록 총 findings 증가는 자연스러움
+  const fileCount = Math.max(files.length, 1);
+  const reviewDensity = allReview / fileCount;
+  // 밀도 기반 감점: 파일당 5건 이하 = 가벼움, 10건 = 중간, 20건+ = 심각
+  const reviewPenalty = Math.min(30, Math.round(reviewDensity * 1.5));
   const overallScore = overallVerdict === 'PASS' ? 100
-    : overallVerdict === 'REVIEW' ? Math.max(60, 100 - allReview * 2)
+    : overallVerdict === 'REVIEW' ? Math.min(100, Math.max(60, 100 - reviewPenalty) + goodBoost)
     : Math.max(0, 50 - allHardFail * 5);
   const overallStatus = overallVerdict.toLowerCase() as 'pass' | 'review' | 'fail';
   const duration = Math.round(performance.now() - startTime);
@@ -495,9 +512,11 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   };
 
   // Output
-  if (opts.format === 'json') {
+  if (isJson) {
+    console.log = _origLog; // stdout 복원 — 순수 JSON 출력
     console.log(JSON.stringify({
-      files: files.length, verdict: overallVerdict, teams,
+      files: files.length, verdict: overallVerdict, overallScore,
+      teams,
       summary: { hardFail: allHardFail, reviewRequired: allReview, styleNote: allNote },
       goodPatternReport,
       duration, aiVerified, falsePositivesRemoved,
