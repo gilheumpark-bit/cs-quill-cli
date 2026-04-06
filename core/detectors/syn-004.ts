@@ -15,7 +15,7 @@ export const syn004Detector: RuleDetector = {
       const rawMsg = diag.getMessageText();
       const msg = typeof rawMsg === 'string' ? rawMsg : (rawMsg as any).messageText || '';
       
-      if (diag.getCode() === 1005 && (msg.includes(\"';'\"))) {
+      if (diag.getCode() === 1005 && (msg.includes("';'"))) {
         findings.push({ 
           line: diag.getLineNumber() || 1, 
           message: `세미콜론 누락 위반: ${msg}` 
