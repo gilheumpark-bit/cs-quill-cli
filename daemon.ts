@@ -493,6 +493,54 @@ async function _handleMessageInner(
       break;
     }
 
+    // ── Advanced IDE Protocol Stubs ──
+
+    case 'get_symbols': {
+      // Stub: symbol table — returns placeholder data until real AST parser is wired
+      const { filePath: symPath } = msg.payload as { filePath: string; content: string };
+      sendWS(session.socket, {
+        type: 'get_symbols',
+        id: requestId,
+        payload: [
+          { name: 'placeholder', kind: 'function', line: 1, endLine: 10, children: [], detail: `stub symbol for ${require('path').basename(symPath)}` },
+        ],
+      });
+      break;
+    }
+
+    case 'get_function_findings': {
+      // Stub: per-function findings — returns empty findings until analysis is scoped
+      const { filePath: fnPath, functionName } = msg.payload as { filePath: string; functionName: string };
+      sendWS(session.socket, {
+        type: 'get_function_findings',
+        id: requestId,
+        payload: [],
+      });
+      break;
+    }
+
+    case 'get_coverage': {
+      // Stub: coverage data — returns null until coverage integration is built
+      const { filePath: covPath } = msg.payload as { filePath: string };
+      sendWS(session.socket, {
+        type: 'get_coverage',
+        id: requestId,
+        payload: null,
+      });
+      break;
+    }
+
+    case 'rename_symbol': {
+      // Stub: rename refactoring — returns empty edits until rename engine is wired
+      const { filePath: renPath, position, newName } = msg.payload as { filePath: string; position: { line: number; character: number }; newName: string };
+      sendWS(session.socket, {
+        type: 'rename_symbol',
+        id: requestId,
+        payload: { edits: [], filesAffected: 0 },
+      });
+      break;
+    }
+
     default: {
       sendWS(session.socket, {
         type: 'error',

@@ -67,10 +67,12 @@ function filterTeamFindings(
     }));
     const result = runFalsePositiveFilter(mapped, filePath, code);
     const kept = result.kept;
-    // 점수 재계산 (필터 후 findings 기준)
-    const errors = kept.filter((f: any) => f.severity === 'error' || f.severity === 'critical').length;
+    // 점수 재계산 (필터 후 findings 기준) — SEC/RTE critical만 heavy penalty
+    const secCriticals = kept.filter((f: any) => f.severity === 'critical' && f.ruleId && /^(SEC|RTE)-/i.test(f.ruleId)).length;
+    const errors = kept.filter((f: any) => f.severity === 'error').length;
+    const otherCriticals = kept.filter((f: any) => f.severity === 'critical').length - secCriticals;
     const warnings = kept.filter((f: any) => f.severity === 'warning').length;
-    const score = Math.max(0, 100 - errors * 10 - warnings * 2);
+    const score = Math.max(0, 100 - secCriticals * 15 - errors * 10 - otherCriticals * 3 - warnings * 2);
     return { name: teamResult.name, score, findings: kept };
   } catch {
     return teamResult; // 필터 없으면 원본
@@ -91,7 +93,9 @@ export async function runStaticPipeline(code: string, language: string): Promise
     const allFindings = engineResult.findings.map((f: any) => ({
       line: f.line ?? 0,
       message: f.message,
-      severity: f.severity === 'critical' ? 'error' as const : f.severity as 'error' | 'warning' | 'info',
+      severity: f.severity === 'critical'
+        ? (f.ruleId && /^(SEC|RTE)-/i.test(f.ruleId) ? 'critical' as const : 'error' as const)
+        : f.severity as 'error' | 'warning' | 'info',
       ruleId: f.ruleId,
       confidence: f.confidence,
       evidence: f.evidence,
@@ -166,13 +170,16 @@ export async function runStaticPipeline(code: string, language: string): Promise
   const verdictTeams: PipelineResult['teams'] = teams.map((t: TeamPipelineChunk) => ({
     name: t.name,
     score: t.score,
-    findings: t.findings.slice(0, 15).map((f: TeamRawFinding) => ({
-      ruleId: `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`,
-      line: f.line ?? 0,
-      level: mapToLevel(f.severity ?? 'warning', f.message ?? ''),
-      confidence: mapToConfidence(f.severity ?? 'warning', f.message ?? ''),
-      message: f.message ?? String(f),
-    })),
+    findings: t.findings.slice(0, 15).map((f: TeamRawFinding) => {
+      const ruleId = f.ruleId ?? `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`;
+      return {
+        ruleId,
+        line: f.line ?? 0,
+        level: mapToLevel(f.severity ?? 'warning', f.message ?? '', ruleId),
+        confidence: mapToConfidence(f.severity ?? 'warning', f.message ?? ''),
+        message: f.message ?? String(f),
+      };
+    }),
   }));
 
   const allFindings = verdictTeams.flatMap(t => t.findings);
@@ -196,9 +203,14 @@ export async function runStaticPipeline(code: string, language: string): Promise
   };
 }
 
-// ── Level/Confidence 변환 헬퍼 — severity 기반 (메시지 키워드 매칭은 자기참조 오탐 유발) ──
-function mapToLevel(severity: string, _message: string): FindingLevel {
-  if (severity === 'critical') return 'hard-fail';
+// ── Level/Confidence 변환 헬퍼 — severity + ruleId 기반 (메시지 키워드 매칭은 자기참조 오탐 유발) ──
+function mapToLevel(severity: string, _message: string, ruleId?: string): FindingLevel {
+  if (severity === 'critical') {
+    // Only SEC (security) and RTE (runtime error) categories warrant hard-fail
+    const category = ruleId ? ruleId.split('-')[0].toUpperCase() : '';
+    if (category === 'SEC' || category === 'RTE') return 'hard-fail';
+    return 'review-required'; // all other critical findings downgrade to review
+  }
   if (severity === 'error') return 'review-required';
   if (severity === 'warning') return 'review-required';
   return 'style-note'; // info 등

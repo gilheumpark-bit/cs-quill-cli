@@ -5,7 +5,9 @@
 // 한 파일에서 findings가 갑자기 폭발하면 → 엔진 오탐 가능성 높음 → bail-out.
 //
 // 원리: 전체 파일의 findings 평균/표준편차를 구하고,
-// 평균 + 2σ 이상인 파일을 anomaly로 분류.
+// anomaly 임계치로 분류. scanMode에 따라:
+// - "single" (증분): mean + 2σ (엄격)
+// - "full" (전수): mean + 3σ (관대 — 전수 스캔 시 자연스러운 분산 허용)
 
 // ============================================================
 // PART 1 — Types
@@ -21,7 +23,7 @@ export interface WaveformPoint {
 export interface WaveformAnalysis {
   mean: number;
   stdDev: number;
-  threshold: number; // mean + 2σ
+  threshold: number; // mean + Nσ (single=2σ, full=3σ)
   points: WaveformPoint[];
   anomalies: WaveformPoint[];
   totalFindings: number;
@@ -34,6 +36,7 @@ export interface WaveformAnalysis {
 
 export function analyzeWaveform(
   fileFindings: Array<{ file: string; findings: number }>,
+  scanMode: 'single' | 'full' = 'single',
 ): WaveformAnalysis {
   if (fileFindings.length === 0) {
     return { mean: 0, stdDev: 0, threshold: 0, points: [], anomalies: [], totalFindings: 0, adjustedFindings: 0 };
@@ -47,8 +50,9 @@ export function analyzeWaveform(
   const variance = counts.reduce((s, c) => s + Math.pow(c - mean, 2), 0) / counts.length;
   const stdDev = Math.sqrt(variance);
 
-  // 임계치: mean + 2σ (최소 20건)
-  const threshold = Math.max(mean + 2 * stdDev, 20);
+  // 임계치: single=mean+2σ, full=mean+3σ (최소 20건)
+  const sigmaMultiplier = scanMode === 'full' ? 3 : 2;
+  const threshold = Math.max(mean + sigmaMultiplier * stdDev, 20);
 
   const points: WaveformPoint[] = fileFindings.map(f => {
     const zScore = stdDev > 0 ? (f.findings - mean) / stdDev : 0;

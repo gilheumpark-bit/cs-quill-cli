@@ -108,6 +108,7 @@ interface TeamResult {
   findings: number;
   blocking: boolean;
   passed: boolean;
+  capped: boolean; // findings가 bail-out threshold로 캡됨
   details: Array<{ line: number; message: string; severity: string }>;
 }
 
@@ -357,22 +358,58 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     console.log(''); // progress 줄바꿈
   }
 
-  // Aggregate team results
+  // Aggregate team results — capped 팀은 감점 점수 + 50% 가중치
   const BLOCKING_TEAMS = new Set(['validation', 'release-ip']);
   const teams: TeamResult[] = [];
+
+  // team-isolation에서 캡 정보 가져오기
+  let cappedTeamNames: Set<string> = new Set();
+  let cappedTeamScore = 40; // 기본값: max(25, 100 - 30*2) = 40
+  try {
+    const teamIsolation = require('../core/team-isolation');
+    if (typeof teamIsolation.getCappedTeamScore === 'function') {
+      cappedTeamScore = teamIsolation.getCappedTeamScore();
+    }
+    // 각 팀의 findings 수로 캡 여부 판단
+    for (const [name, _scores] of allTeamScores) {
+      const findings = allTeamFindings.get(name) ?? 0;
+      const teamFindings = allDetails
+        .slice(0, findings)
+        .map(d => ({ severity: d.severity, message: d.message }));
+      const tv = teamIsolation.computeTeamVerdict(name, teamFindings);
+      if (tv.capped) cappedTeamNames.add(name);
+    }
+  } catch { /* team-isolation 없으면 캡 없음 */ }
 
   for (const [name, scores] of allTeamScores) {
     const avgScore = Math.round(scores.reduce((a, b) => a + b, 0) / scores.length);
     const findings = allTeamFindings.get(name) ?? 0;
     const blocking = BLOCKING_TEAMS.has(name);
+    const isCapped = cappedTeamNames.has(name);
+    // 캡된 팀은 고정 감점 점수 사용
+    const finalScore = isCapped ? cappedTeamScore : avgScore;
     teams.push({
       name,
-      score: avgScore,
+      score: finalScore,
       findings,
       blocking,
-      passed: blocking ? avgScore >= threshold : true,
+      passed: blocking ? finalScore >= threshold : true,
+      capped: isCapped,
       details: [],
     });
+  }
+
+  // 캡된 팀은 50% 가중치로 overall score에 기여
+  if (cappedTeamNames.size > 0) {
+    let weightedSum = 0;
+    let totalWeight = 0;
+    for (const t of teams) {
+      const weight = t.capped ? 0.5 : 1.0;
+      weightedSum += t.score * weight;
+      totalWeight += weight;
+    }
+    // _weightedOverallScore는 아래 overallScore 계산에서 참조
+    (teams as any)._weightedAvg = totalWeight > 0 ? Math.round(weightedSum / totalWeight) : 0;
   }
 
   // AST summary (already included in enhanced pipeline if available)
@@ -392,7 +429,8 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     });
     // 팀별 findings로 더 정확하게
     const teamStats = teams.map(t => ({ file: t.name, findings: t.findings }));
-    const waveform = analyzeWaveform(teamStats);
+    const scanMode = opts.diff ? 'single' : 'full';
+    const waveform = analyzeWaveform(teamStats, scanMode);
     if (waveform.anomalies.length > 0) {
       waveformAnomalies = waveform.anomalies.length;
       console.log(`  ⚡ Waveform: ${waveform.anomalies.length}개 팀 이상치 감지 (μ=${waveform.mean}, σ=${waveform.stdDev})`);
@@ -404,6 +442,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
 
   // ── Team Isolation ──
   let isolatedTeamCount = 0;
+  let cappedTeamCount = 0;
   try {
     const { computeTeamVerdict, aggregateIsolated } = require('../core/team-isolation');
     const teamVerdicts = teams.map(t => {
@@ -415,6 +454,10 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     });
     const isolated = aggregateIsolated(teamVerdicts);
     isolatedTeamCount = isolated.isolatedTeams;
+    cappedTeamCount = teamVerdicts.filter((tv: any) => tv.capped).length;
+    if (cappedTeamCount > 0) {
+      console.log(`  🔒 캡 적용: ${cappedTeamCount}개 팀 findings 제한 (50% 가중치로 verdict 포함)`);
+    }
     if (isolatedTeamCount > 0) {
       console.log(`  🔒 격리: ${isolatedTeamCount}개 팀 bail-out (전체 verdict에서 제외)`);
     }
@@ -464,9 +507,14 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   } catch { /* baseline/suppression 모듈 없으면 skip */ }
 
   // ── Verdict 집계 — 메시지 기반 3단계 분류 ──
-  function classifyLevel(severity: string, _message: string): 'hard-fail' | 'review' | 'note' {
+  function classifyLevel(severity: string, _message: string, ruleId?: string): 'hard-fail' | 'review' | 'note' {
     // severity 기반 분류 — 메시지 키워드 매칭은 자기참조 오탐을 유발하므로 제거
-    if (severity === 'critical') return 'hard-fail';
+    if (severity === 'critical') {
+      // Only SEC (security) and RTE (runtime error) categories warrant hard-fail
+      const category = ruleId ? ruleId.split('-')[0].toUpperCase() : '';
+      if (category === 'SEC' || category === 'RTE') return 'hard-fail';
+      return 'review'; // all other critical findings downgrade to review
+    }
     if (severity === 'error') return 'review';
     if (severity === 'warning') return 'review';
     return 'note'; // info 등
@@ -477,7 +525,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const detailSource = allDetails.length > 0 ? allDetails
     : teams.flatMap(t => t.details ?? []);
   for (const d of detailSource) {
-    const level = classifyLevel(d.severity, d.message);
+    const level = classifyLevel(d.severity, d.message, (d as any).ruleId);
     if (level === 'hard-fail') allHardFail++;
     else if (level === 'review') allReview++;
     else allNote++;
@@ -488,15 +536,23 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   }
 
   const overallVerdict = allHardFail > 0 ? 'FAIL' : allReview > 5 ? 'REVIEW' : 'PASS';
-  // 양품 패턴 부스트: 패턴당 0.5점, 최대 10점 (실제 코드 품질 반영)
-  const goodBoost = Math.min(Math.round(totalGoodPatterns * 0.5), 10);
-  // 파일당 findings 밀도로 정규화 — 파일 수가 많을수록 총 findings 증가는 자연스러움
+  // 양품 패턴 부스트: 패턴당 1.0점, 최대 20점 (17+ 패턴도 충분히 반영)
+  const goodBoost = Math.min(Math.round(totalGoodPatterns * 1.0), 20);
+  // 필터 보너스: 정수필터+AI가 제거한 비율에 비례, 최대 15점
+  const totalRaw = allReview + filterDismissed + falsePositivesRemoved;
+  const filterBonus = totalRaw > 0
+    ? Math.min(Math.round((filterDismissed + falsePositivesRemoved) / totalRaw * 15), 15)
+    : 0;
+  // 팀 건강도 보너스: 50% 초과 팀이 통과하면 +5
+  const passingTeams = teams.filter(t => t.score >= threshold).length;
+  const teamHealthBonus = (teams.length > 0 && passingTeams / teams.length > 0.5) ? 5 : 0;
+  // 파일당 findings 밀도로 정규화 — allReview는 정수필터/AI 제거 후 값
   const fileCount = Math.max(files.length, 1);
   const reviewDensity = allReview / fileCount;
   // 밀도 기반 감점: 파일당 5건 이하 = 가벼움, 10건 = 중간, 20건+ = 심각
   const reviewPenalty = Math.min(30, Math.round(reviewDensity * 1.5));
   const overallScore = overallVerdict === 'PASS' ? 100
-    : overallVerdict === 'REVIEW' ? Math.min(100, Math.max(60, 100 - reviewPenalty) + goodBoost)
+    : overallVerdict === 'REVIEW' ? Math.min(100, Math.max(60, 100 - reviewPenalty) + goodBoost + filterBonus + teamHealthBonus)
     : Math.max(0, 50 - allHardFail * 5);
   const overallStatus = overallVerdict.toLowerCase() as 'pass' | 'review' | 'fail';
   const duration = Math.round(performance.now() - startTime);
@@ -518,6 +574,17 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
       files: files.length, verdict: overallVerdict, overallScore,
       teams,
       summary: { hardFail: allHardFail, reviewRequired: allReview, styleNote: allNote },
+      scoring: {
+        reviewDensity: Math.round(reviewDensity * 100) / 100,
+        reviewPenalty,
+        goodBoost,
+        filterBonus,
+        teamHealthBonus,
+        filterDismissed,
+        totalRaw,
+        passingTeams,
+        totalTeams: teams.length,
+      },
       goodPatternReport,
       duration, aiVerified, falsePositivesRemoved,
     }, null, 2));
@@ -528,7 +595,7 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   for (const team of teams) {
     let hf = 0, rr = 0, sn = 0;
     for (const d of (team.details ?? [])) {
-      const lv = classifyLevel(d.severity, d.message);
+      const lv = classifyLevel(d.severity, d.message, (d as any).ruleId);
       if (lv === 'hard-fail') hf++;
       else if (lv === 'review') rr++;
       else sn++;
@@ -566,6 +633,12 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const verdictColor = overallVerdict === 'PASS' ? colors.green : overallVerdict === 'REVIEW' ? colors.yellow : colors.red;
   console.log(`  ${verdictIcon} ${verdictColor(overallVerdict)} | ${files.length}파일 | ${duration}ms`);
   console.log(`  hard-fail: ${allHardFail}건 | review: ${allReview}건 | note: ${allNote > 0 ? allNote : 0}건`);
+  if (overallVerdict === 'REVIEW') {
+    const scoreParts = [`감점 -${reviewPenalty}`, `양품 +${goodBoost}`];
+    if (filterBonus > 0) scoreParts.push(`필터 +${filterBonus}`);
+    if (teamHealthBonus > 0) scoreParts.push(`팀건강 +${teamHealthBonus}`);
+    console.log(`  📊 점수 구성: base 100 → ${scoreParts.join(', ')} = ${overallScore}`);
+  }
   if (filterDismissed > 0) {
     console.log(`  🧹 정수 필터 — ${filterDismissed}건 확정 오탐 제거`);
   }

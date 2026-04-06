@@ -67,8 +67,15 @@ function mapFindingToTeam(finding: { message: string; severity: string }): strin
   return 'governance';
 }
 
-function mapSeverity(severity: string): ASTFinding['severity'] {
-  if (severity === 'critical') return 'critical';
+function mapSeverity(severity: string, ruleId?: string): ASTFinding['severity'] {
+  // Only SEC-* and RTE-* rules should be critical
+  if (severity === 'critical') {
+    const category = ruleId ? ruleId.split('-')[0].toUpperCase() : '';
+    if (category === 'SEC' || category === 'RTE') return 'critical';
+    // ERR, TYP, ASY → error; everything else → warning
+    if (category === 'ERR' || category === 'TYP' || category === 'ASY') return 'error';
+    return 'warning';
+  }
   if (severity === 'error') return 'error';
   if (severity === 'warning') return 'warning';
   return 'info';
@@ -129,7 +136,7 @@ export async function runEnhancedPipeline(
         engine: (f as any).engine ?? 'ast',
         line: f.line,
         message: f.message,
-        severity: mapSeverity(f.severity),
+        severity: mapSeverity(f.severity, (f as any).ruleId),
         team: mapFindingToTeam(f),
         confidence: 0.8,
       });
@@ -235,7 +242,9 @@ export async function runEnhancedPipeline(
       for (const f of deepResult.findings) {
         findings.push({
           engine: 'deep-verify', line: f.line, message: `[${f.severity}] ${f.message}`,
-          severity: f.severity === 'P0' ? 'critical' : f.severity === 'P1' ? 'error' : 'warning',
+          severity: f.severity === 'P0'
+            ? (f.category === 'unsafe-cast' || f.category === 'resource-leak' ? 'error' as const : 'error' as const)
+            : f.severity === 'P1' ? 'error' : 'warning',
           team: f.category === 'brace-balance' || f.category === 'declaration-order' ? 'validation' :
                 f.category === 'async-pattern' ? 'stability' :
                 f.category === 'unsafe-cast' ? 'validation' :
@@ -257,7 +266,7 @@ export async function runEnhancedPipeline(
         findings.push({
           engine: 'cfg', line: path.nodes[0]?.line ?? 0,
           message: `[CFG-${path.risk}] ${path.description}`,
-          severity: path.risk === 'tainted' ? 'critical' : path.risk === 'nullable' ? 'error' : 'warning',
+          severity: path.risk === 'tainted' ? 'critical' : path.risk === 'nullable' ? 'warning' : 'warning',
           team: path.risk === 'tainted' ? 'release-ip' : 'validation',
           confidence: 0.88,
         });
@@ -376,7 +385,7 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
         findings.push({
           engine: 'ts-morph', line: fn.getStartLineNumber(),
           message: `Empty function: ${fn.getName() ?? 'anonymous'} — body has 0 statements`,
-          severity: 'error', team: 'generation', confidence: 0.95,
+          severity: 'warning', team: 'generation', confidence: 0.95,
         });
       }
     }
@@ -395,7 +404,7 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
             findings.push({
               engine: 'ts-morph', line: decl.getStartLineNumber(),
               message: `Empty arrow function: const ${decl.getName()} = () => {}`,
-              severity: 'error', team: 'generation', confidence: 0.95,
+              severity: 'warning', team: 'generation', confidence: 0.95,
             });
           }
         }
@@ -414,7 +423,7 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
             findings.push({
               engine: 'ts-morph', line: arrow.getStartLineNumber(),
               message: 'Empty arrow function body',
-              severity: 'error', team: 'generation', confidence: 0.9,
+              severity: 'warning', team: 'generation', confidence: 0.9,
             });
           }
         }
@@ -531,10 +540,14 @@ async function runASTHollowScanSingle(code: string, fileName: string): Promise<A
       
       const pFindings = detector.detect(sourceFile);
       for (const pf of pFindings) {
-        // Find best severity mapping matching ASTFinding interface
+        // Map severity based on rule category prefix (SEC/RTE → critical, ERR/TYP/ASY → error, rest → warning)
+        const ruleCategory = detector.ruleId ? detector.ruleId.split('-')[0].toUpperCase() : '';
         let mappedSev: 'critical'|'error'|'warning'|'info' = 'warning';
-        if (ruleMeta.severity === 'critical') mappedSev = 'critical';
-        else if (ruleMeta.severity === 'high') mappedSev = 'error';
+        if (ruleMeta.severity === 'critical' || ruleMeta.severity === 'high') {
+          if (ruleCategory === 'SEC' || ruleCategory === 'RTE') mappedSev = 'critical';
+          else if (ruleCategory === 'ERR' || ruleCategory === 'TYP' || ruleCategory === 'ASY') mappedSev = 'error';
+          else mappedSev = 'warning'; // CMX, STL, LOG, API, AIP, PRF, RES, CFG, TST, VAR, SYN etc.
+        }
         else if (ruleMeta.severity === 'info') mappedSev = 'info';
 
         // Find confidence math
