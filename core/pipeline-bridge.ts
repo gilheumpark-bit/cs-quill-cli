@@ -38,6 +38,7 @@ export interface PipelineResult {
   verdict: 'pass' | 'review' | 'fail';
   teams: Array<{
     name: string;
+    score: number;
     findings: Finding[];
   }>;
   summary: {
@@ -164,6 +165,7 @@ export async function runStaticPipeline(code: string, language: string): Promise
   // ── Verdict 변환: score 기반 → level 기반 ──
   const verdictTeams: PipelineResult['teams'] = teams.map((t: TeamPipelineChunk) => ({
     name: t.name,
+    score: t.score,
     findings: t.findings.slice(0, 15).map((f: TeamRawFinding) => ({
       ruleId: `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`,
       line: f.line ?? 0,

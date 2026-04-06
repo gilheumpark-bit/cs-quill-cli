@@ -1,22 +1,20 @@
 import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
-/**
- * Phase / Rule Category: performance
- */
 export const prf003Detector: RuleDetector = {
   ruleId: 'PRF-003',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
+    const findings: Array<{line: number; message: string}> = [];
+
     sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('map')) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'PRF-003 위반 의심' 
-        });
+      if (node.getKind() === SyntaxKind.CallExpression) {
+        const text = node.getText();
+        if (/JSON\s*\.\s*parse\s*\(\s*JSON\s*\.\s*stringify\s*\(/.test(text)) {
+          findings.push({
+            line: node.getStartLineNumber(),
+            message: 'JSON.parse(JSON.stringify(...))로 깊은 복사를 수행하고 있습니다. structuredClone() 또는 전용 라이브러리를 사용하세요.',
+          });
+        }
       }
     });
 

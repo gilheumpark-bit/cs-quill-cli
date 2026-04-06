@@ -298,6 +298,29 @@ export async function runEnhancedPipeline(
 // ============================================================
 
 export async function runASTHollowScan(code: string, fileName: string): Promise<ASTFinding[]> {
+  // --- Pre-filter: chunk large / obfuscated files instead of blocking ---
+  const { preFilter } = require('./pre-filter');
+  const pf = preFilter(code, fileName);
+
+  if (pf.chunked) {
+    // Run scan on each chunk, merge results with line-offset adjustment
+    const merged: ASTFinding[] = [];
+    for (const chunk of pf.chunks) {
+      const chunkFindings = await runASTHollowScanSingle(chunk.code, fileName);
+      for (const f of chunkFindings) {
+        merged.push({ ...f, line: f.line + chunk.startLine });
+      }
+    }
+    // Per-file cap: max 80 findings
+    return merged.length > 80 ? merged.slice(0, 80) : merged;
+  }
+
+  // Single chunk (pass-through or noise-stripped fit) — run as-is
+  return runASTHollowScanSingle(code, fileName);
+}
+
+/** Inner scan logic for a single code chunk. */
+async function runASTHollowScanSingle(code: string, fileName: string): Promise<ASTFinding[]> {
   const findings: ASTFinding[] = [];
 
   try {

@@ -1,25 +1,23 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: complexity
+ * CMX-004: 파일 1000줄 초과
+ * Detects source files exceeding 1000 lines.
  */
 export const cmx004Detector: RuleDetector = {
   ruleId: 'CMX-004',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
-    sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'CMX-004 위반 의심' 
-        });
-      }
-    });
+    const findings: Array<{line: number; message: string}> = [];
+    const MAX_LINES = 1000;
+
+    const lineCount = sourceFile.getEndLineNumber();
+    if (lineCount > MAX_LINES) {
+      findings.push({
+        line: 1,
+        message: `파일이 ${lineCount}줄로 ${MAX_LINES}줄 제한을 초과합니다.`,
+      });
+    }
 
     return findings;
-  }
+  },
 };

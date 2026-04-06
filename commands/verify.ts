@@ -230,6 +230,27 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     fpFilter = require('../core/false-positive-filter');
   } catch { /* 필터 없으면 skip */ }
 
+  // ── 양품 패턴 감지 추적 ──
+  let goodPatternCatalog: any = null;
+  let detectGoodPatternsFn: ((code: string) => Set<string>) | null = null;
+  try {
+    goodPatternCatalog = require('../core/good-pattern-catalog');
+    if (fpFilter && typeof fpFilter.detectGoodPatterns === 'function') {
+      detectGoodPatternsFn = fpFilter.detectGoodPatterns;
+    }
+  } catch { /* catalog not available */ }
+
+  // Per-quality dimension accumulator
+  const goodPatternsByQuality: Record<string, { count: number; examples: string[] }> = {
+    Maintainability: { count: 0, examples: [] },
+    Reliability: { count: 0, examples: [] },
+    Security: { count: 0, examples: [] },
+    Performance: { count: 0, examples: [] },
+  };
+  let totalGoodPatterns = 0;
+  let goodSuppressedFindings = 0;
+  let goodDowngradedFindings = 0;
+
   {
     for (let fi = 0; fi < files.length; fi++) {
       const file = files[fi];
@@ -277,6 +298,40 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
             }
           }
         } catch { /* AI 호출 실패 — static 결과 유지 */ }
+      }
+
+      // ── 양품 패턴 감지 (파일별) ──
+      if (detectGoodPatternsFn && goodPatternCatalog) {
+        try {
+          const detected = detectGoodPatternsFn(file.content);
+          const suppressMap = fpFilter?.SUPPRESS_MAP ?? {};
+          for (const goodId of detected) {
+            const meta = goodPatternCatalog.getGoodPattern(goodId);
+            if (meta) {
+              const q = goodPatternsByQuality[meta.quality];
+              if (q) {
+                q.count++;
+                if (q.examples.length < 5 && !q.examples.includes(meta.title)) {
+                  q.examples.push(meta.title);
+                }
+              }
+              totalGoodPatterns++;
+              // Count suppressions: how many fileDetails would be suppressed by this good pattern
+              if (meta.signal === 'suppress-fp' || meta.suppresses) {
+                const suppressedIds = suppressMap[goodId] ?? meta.suppresses ?? [];
+                for (const fd of fileDetails) {
+                  if ((fd as any).ruleId && suppressedIds.includes((fd as any).ruleId)) {
+                    goodSuppressedFindings++;
+                  }
+                }
+              }
+              // Count boost signal downgrades
+              if (meta.signal === 'boost') {
+                goodDowngradedFindings++;
+              }
+            }
+          }
+        } catch { /* good pattern detection failed — skip */ }
       }
 
       allDetails.push(...fileDetails);
@@ -429,11 +484,22 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   const overallStatus = overallVerdict.toLowerCase() as 'pass' | 'review' | 'fail';
   const duration = Math.round(performance.now() - startTime);
 
+  // ── 양품 감지 리포트 데이터 ──
+  const goodPatternReport = {
+    total: totalGoodPatterns,
+    byQuality: Object.fromEntries(
+      Object.entries(goodPatternsByQuality).map(([k, v]) => [k, { count: v.count, examples: v.examples }])
+    ),
+    suppressed: goodSuppressedFindings,
+    downgraded: goodDowngradedFindings,
+  };
+
   // Output
   if (opts.format === 'json') {
     console.log(JSON.stringify({
       files: files.length, verdict: overallVerdict, teams,
       summary: { hardFail: allHardFail, reviewRequired: allReview, styleNote: allNote },
+      goodPatternReport,
       duration, aiVerified, falsePositivesRemoved,
     }, null, 2));
     return;
@@ -458,6 +524,22 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
       sn > 0 ? `${sn} note` : '',
     ].filter(Boolean).join(', ') || colors.green('clean');
     console.log(`  ${label.padEnd(35)} ${counts}`);
+  }
+
+  // ── 양품 감지 리포트 (텍스트) ──
+  if (totalGoodPatterns > 0) {
+    console.log('');
+    printSection('양품 패턴 감지');
+    for (const [quality, data] of Object.entries(goodPatternsByQuality)) {
+      if (data.count > 0) {
+        const examples = data.examples.length > 0 ? ` (${data.examples.join(', ')})` : '';
+        console.log(`     ${quality}: ${data.count}건${examples}`);
+      }
+    }
+    const parts = [`총 ${totalGoodPatterns}건 감지`];
+    if (goodSuppressedFindings > 0) parts.push(`불량 ${goodSuppressedFindings}건 억제`);
+    if (goodDowngradedFindings > 0) parts.push(`${goodDowngradedFindings}건 신뢰도 하향`);
+    console.log(`     ${parts.join(' → ')}`);
   }
 
   printSection('종합');

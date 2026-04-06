@@ -32,7 +32,9 @@ export interface FilterResult {
     stage2: number; // 문법 필터
     stage3: number; // 컨텍스트 필터
     stage4: number; // 자기참조 필터
+    stage5: number; // 양품 suppress-fp 필터
     kept: number;   // AI로 넘어가는 것
+    boostDowngrades: number; // boost 신호로 confidence 하향 조정된 수
   };
 }
 
@@ -285,7 +287,7 @@ const FP_CHECKLIST: FPRule[] = [
  * 양품 패턴이 감지된 코드에서 관련 불량 findings의 confidence를 낮추거나 제거.
  * "타입 narrowing이 있으면 null dereference 오탐 가능성이 낮다"
  */
-function detectGoodPatterns(code: string): Set<string> {
+export function detectGoodPatterns(code: string): Set<string> {
   const detected = new Set<string>();
 
   // GQ-NL-010: 타입 narrowing → RTE-001,002,003 억제
@@ -381,11 +383,113 @@ function detectGoodPatterns(code: string): Set<string> {
   // 패턴5: 선언적 파이프라인 → PRF-002 억제
   if (/\.filter\([^)]+\)\s*\.\s*map\(|\.map\([^)]+\)\s*\.\s*filter\(/.test(code)) detected.add('GQ-FN-008');
 
+  // ================================================================
+  // boost 패턴 (신규 — quality 차원 건전성 증명)
+  // suppress-fp와 달리 특정 ruleId를 dismiss하지 않고,
+  // 같은 quality 차원의 findings confidence를 하향 조정.
+  // ================================================================
+
+  // ── Reliability boosts ──
+  // GQ-TS-001: strict: true in tsconfig → Reliability
+  if (/"strict"\s*:\s*true|compilerOptions[\s\S]{0,200}strict/.test(code)) detected.add('GQ-TS-001');
+  // GQ-TS-003: 파라미터 타입 완전 명시 → Reliability
+  if (/function\s+\w+\s*\([^)]*:\s*\w+/.test(code)) detected.add('GQ-TS-003');
+  // GQ-TS-005: readonly 수정자 → Reliability
+  if (/\breadonly\b/.test(code)) detected.add('GQ-TS-005');
+  // GQ-TS-009: 타입 가드 is 접두사 → Reliability
+  if (/\):\s*\w+\s+is\s+\w+/.test(code)) detected.add('GQ-TS-009');
+  // GQ-TS-010: discriminated union → Reliability
+  if (/type\s*=\s*['"]|kind\s*:\s*['"]|tag\s*:\s*['"]/.test(code)) detected.add('GQ-TS-010');
+  // GQ-FN-006: 파라미터 기본값 → Reliability
+  if (/\(\s*\w+\s*:\s*\w+\s*=\s*[^,)]+/.test(code)) detected.add('GQ-FN-006');
+  // GQ-NL-004: 배열 length 확인 → Reliability
+  if (/\.length\s*[><=!]==?\s*\d|\.length\s*\)/.test(code)) detected.add('GQ-NL-004');
+  // GQ-NL-006: Array.isArray → Reliability
+  if (/Array\.isArray/.test(code)) detected.add('GQ-NL-006');
+  // GQ-NL-008: Number.isNaN → Reliability
+  if (/Number\.isNaN/.test(code)) detected.add('GQ-NL-008');
+  // GQ-AS-004: AbortController → Reliability
+  if (/AbortController|AbortSignal|\.abort\(/.test(code)) detected.add('GQ-AS-004');
+  // GQ-AS-009: Promise.race timeout → Reliability
+  if (/Promise\.race/.test(code)) detected.add('GQ-AS-009');
+  // GQ-AS-010: retry exponential backoff → Reliability
+  if (/retry|backoff|exponential/i.test(code)) detected.add('GQ-AS-010');
+  // GQ-EH-002: instanceof 에러 타입 구분 → Reliability
+  if (/instanceof\s+\w*Error/.test(code)) detected.add('GQ-EH-002');
+  // GQ-EH-006: Result 타입 패턴 → Reliability
+  if (/Result<|Either<|Ok\(|Err\(|isOk|isErr/.test(code)) detected.add('GQ-EH-006');
+  // GQ-NW-006: Array.at(-1) → Reliability
+  if (/\.at\(\s*-?\d+\s*\)/.test(code)) detected.add('GQ-NW-006');
+  // GQ-NW-010: noUncheckedIndexedAccess → Reliability
+  if (/noUncheckedIndexedAccess/.test(code)) detected.add('GQ-NW-010');
+  // GQ-CF-001: strict: true in config → Reliability
+  if (/"strict"\s*:\s*true/.test(code)) detected.add('GQ-CF-001');
+
+  // ── Maintainability boosts ──
+  // GQ-NM-002: boolean is/has/can/should 접두사
+  if (/\b(is|has|can|should|was|will)[A-Z]\w*\s*[=:(]/.test(code)) detected.add('GQ-NM-002');
+  // GQ-NM-003: 상수 UPPER_SNAKE_CASE
+  if (/const\s+[A-Z][A-Z_\d]{2,}\s*=/.test(code)) detected.add('GQ-NM-003');
+  // GQ-NM-008: 함수명 동사 시작
+  if (/function\s+(get|set|create|update|delete|fetch|handle|process|validate|check|parse|format|build|init|load|save|send|compute|render|transform)\w+/.test(code)) detected.add('GQ-NM-008');
+  // GQ-NM-011: 이벤트 핸들러 on/handle 접두사
+  if (/\b(on|handle)[A-Z]\w*\s*[=(]/.test(code)) detected.add('GQ-NM-011');
+  // GQ-TS-002: 명시적 반환 타입
+  if (/\)\s*:\s*(string|number|boolean|void|Promise<|Array<|\w+\[\]|Record<|\{)/.test(code)) detected.add('GQ-TS-002');
+  // GQ-TS-007: Pick/Omit/Partial/Required 유틸리티 타입
+  if (/\b(Pick|Omit|Partial|Required|Extract|Exclude)</.test(code)) detected.add('GQ-TS-007');
+  // GQ-FN-005: 파라미터 객체화 options
+  if (/\boptions\s*[?]?:\s*\{|\bopts\s*[?]?:\s*\{|\bconfig\s*[?]?:\s*\{/.test(code)) detected.add('GQ-FN-005');
+  // GQ-SL-004: 전략 패턴
+  if (/strategies\s*[=:]|strategy\s*[=:]|Strategy</.test(code)) detected.add('GQ-SL-004');
+  // GQ-DP-001: Factory 함수 createXxx
+  if (/function\s+create[A-Z]\w+|const\s+create[A-Z]\w+\s*=/.test(code)) detected.add('GQ-DP-001');
+  // GQ-DP-009: Observer EventEmitter
+  if (/EventEmitter|\.emit\(/.test(code)) detected.add('GQ-DP-009');
+  // GQ-NW-004: import type 분리
+  if (/import\s+type\s+\{/.test(code)) detected.add('GQ-NW-004');
+  // GQ-DC-001: JSDoc public API
+  if (/\/\*\*[\s\S]*?@(param|returns|throws|example)/.test(code)) detected.add('GQ-DC-001');
+  // GQ-DC-005: TODO 이슈 번호 포함
+  if (/TODO\s*[\[(#]\s*\d+|FIXME\s*[\[(#]\s*\d+/.test(code)) detected.add('GQ-DC-005');
+
+  // ── Performance boosts ──
+  // GQ-PF-003: DocumentFragment
+  if (/DocumentFragment|createDocumentFragment/.test(code)) detected.add('GQ-PF-003');
+  // GQ-PF-004: requestAnimationFrame
+  if (/requestAnimationFrame/.test(code)) detected.add('GQ-PF-004');
+  // GQ-PF-006: Lazy loading dynamic import
+  if (/import\(\s*['"`]|React\.lazy/.test(code)) detected.add('GQ-PF-006');
+  // GQ-PF-007: 캐시 TTL+size limit
+  if (/\bcache\b.*\b(ttl|maxSize|max_size|expire|maxAge)/i.test(code) || /\bLRU\b|lru-cache/.test(code)) detected.add('GQ-PF-007');
+  // GQ-PF-009: IntersectionObserver
+  if (/IntersectionObserver/.test(code)) detected.add('GQ-PF-009');
+  // GQ-FN-013: useMemo/useCallback
+  if (/\buseMemo\b|\buseCallback\b/.test(code)) detected.add('GQ-FN-013');
+
+  // ── Security boosts ──
+  // GQ-SC-001: 파라미터화 쿼리/ORM
+  if (/\$\d+|\.query\s*\(\s*['"`][^'"]*\$|\bprisma\b|\btypeorm\b|\bsequelize\b|\bknex\b/.test(code)) detected.add('GQ-SC-001');
+  // GQ-SC-002: DOMPurify/escaping
+  if (/DOMPurify|sanitize|escape[Hh]tml|xss/.test(code)) detected.add('GQ-SC-002');
+  // GQ-SC-004: httpOnly secure sameSite
+  if (/httpOnly|sameSite|secure\s*:\s*true/.test(code)) detected.add('GQ-SC-004');
+  // GQ-SC-005: CORS 특정 origin
+  if (/cors\s*\(\s*\{[\s\S]{0,100}?origin/.test(code)) detected.add('GQ-SC-005');
+  // GQ-SC-006: Helmet 보안 헤더
+  if (/helmet\(|require\(['"]helmet['"]\)|from\s+['"]helmet['"]/.test(code)) detected.add('GQ-SC-006');
+  // GQ-SC-008: JWT 만료 검증
+  if (/expiresIn|jwt\.verify/.test(code)) detected.add('GQ-SC-008');
+  // GQ-SC-012: CSRF 토큰 검증
+  if (/csrf|csurf|_token|xsrf/i.test(code)) detected.add('GQ-SC-012');
+  // GQ-OB-008: 민감 정보 로그 마스킹
+  if (/mask|redact|sanitize.*log|scrub/i.test(code)) detected.add('GQ-OB-008');
+
   return detected;
 }
 
 /** 양품→불량 억제 매핑 */
-const SUPPRESS_MAP: Record<string, string[]> = {
+export const SUPPRESS_MAP: Record<string, string[]> = {
   'GQ-NL-010': ['RTE-001', 'RTE-002', 'RTE-003'],
   'GQ-AS-005': ['ASY-003', 'ERR-010'],
   'GQ-EH-003': ['ERR-001', 'ERR-002'],
@@ -425,6 +529,101 @@ const SUPPRESS_MAP: Record<string, string[]> = {
 };
 
 // ============================================================
+// PART 3b — Boost Signal Infrastructure
+// ============================================================
+
+type IsoQuality = 'Maintainability' | 'Reliability' | 'Security' | 'Performance';
+
+/**
+ * 불량 ruleId prefix -> ISO 25010 quality 차원 매핑.
+ * boost 패턴이 같은 quality 차원에서 감지되면 해당 finding의 confidence를 하향 조정.
+ */
+const RULE_PREFIX_TO_QUALITY: Record<string, IsoQuality> = {
+  // Reliability: 런타임 오류, 타입, 비동기, 에러 처리, 리소스
+  'RTE': 'Reliability', 'TYP': 'Reliability', 'ASY': 'Reliability',
+  'ERR': 'Reliability', 'RES': 'Reliability', 'CFG': 'Reliability', 'TST': 'Reliability',
+  // Maintainability: 복잡도, 로직, 변수, 스타일
+  'CMX': 'Maintainability', 'LOG': 'Maintainability', 'VAR': 'Maintainability',
+  'STL': 'Maintainability', 'AIP': 'Maintainability',
+  // Security
+  'SEC': 'Security',
+  // Performance
+  'PRF': 'Performance',
+};
+
+/**
+ * 양품 패턴 ID -> 해당 패턴이 증명하는 quality 차원.
+ * good-pattern-catalog.ts의 quality 필드와 일치.
+ */
+const BOOST_QUALITY_MAP: Record<string, IsoQuality> = {
+  // Reliability boosts
+  'GQ-TS-001': 'Reliability', 'GQ-TS-003': 'Reliability', 'GQ-TS-004': 'Reliability',
+  'GQ-TS-005': 'Reliability', 'GQ-TS-009': 'Reliability', 'GQ-TS-010': 'Reliability',
+  'GQ-FN-006': 'Reliability', 'GQ-FN-009': 'Reliability', 'GQ-FN-010': 'Reliability',
+  'GQ-FN-012': 'Reliability',
+  'GQ-NL-001': 'Reliability', 'GQ-NL-002': 'Reliability', 'GQ-NL-004': 'Reliability',
+  'GQ-NL-005': 'Reliability', 'GQ-NL-006': 'Reliability', 'GQ-NL-007': 'Reliability',
+  'GQ-NL-008': 'Reliability', 'GQ-NL-010': 'Reliability',
+  'GQ-AS-003': 'Reliability', 'GQ-AS-004': 'Reliability', 'GQ-AS-005': 'Reliability',
+  'GQ-AS-009': 'Reliability', 'GQ-AS-010': 'Reliability',
+  'GQ-EH-001': 'Reliability', 'GQ-EH-002': 'Reliability', 'GQ-EH-003': 'Reliability',
+  'GQ-EH-006': 'Reliability', 'GQ-EH-010': 'Reliability',
+  'GQ-RS-001': 'Reliability', 'GQ-FP-004': 'Reliability',
+  'GQ-NW-006': 'Reliability', 'GQ-NW-010': 'Reliability', 'GQ-CF-001': 'Reliability',
+  // Maintainability boosts
+  'GQ-NM-002': 'Maintainability', 'GQ-NM-003': 'Maintainability', 'GQ-NM-008': 'Maintainability',
+  'GQ-NM-011': 'Maintainability',
+  'GQ-TS-002': 'Maintainability', 'GQ-TS-007': 'Maintainability',
+  'GQ-FN-004': 'Maintainability', 'GQ-FN-005': 'Maintainability', 'GQ-FN-008': 'Maintainability',
+  'GQ-SL-004': 'Maintainability', 'GQ-SL-006': 'Maintainability',
+  'GQ-DP-001': 'Maintainability', 'GQ-DP-009': 'Maintainability',
+  'GQ-NW-004': 'Maintainability',
+  'GQ-DC-001': 'Maintainability', 'GQ-DC-005': 'Maintainability', 'GQ-CF-007': 'Maintainability',
+  // Performance boosts
+  'GQ-AS-002': 'Performance', 'GQ-PF-002': 'Performance', 'GQ-PF-003': 'Performance',
+  'GQ-PF-004': 'Performance', 'GQ-PF-005': 'Performance', 'GQ-PF-006': 'Performance',
+  'GQ-PF-007': 'Performance', 'GQ-PF-009': 'Performance', 'GQ-PF-010': 'Performance',
+  'GQ-FN-013': 'Performance',
+  // Security boosts
+  'GQ-SC-001': 'Security', 'GQ-SC-002': 'Security', 'GQ-SC-003': 'Security',
+  'GQ-SC-004': 'Security', 'GQ-SC-005': 'Security', 'GQ-SC-006': 'Security',
+  'GQ-SC-007': 'Security', 'GQ-SC-008': 'Security', 'GQ-SC-009': 'Security',
+  'GQ-SC-012': 'Security', 'GQ-OB-008': 'Security',
+};
+
+/**
+ * 감지된 양품 패턴에서 boost 신호가 활성화된 quality 차원 세트를 계산.
+ * 한 차원에서 2개 이상의 boost 패턴이 감지되면 해당 차원이 "건전하다"고 판단.
+ */
+function computeBoostedQualities(detectedPatterns: Set<string>): Set<IsoQuality> {
+  const qualityCounts: Record<IsoQuality, number> = {
+    'Maintainability': 0, 'Reliability': 0, 'Security': 0, 'Performance': 0,
+  };
+  for (const patternId of detectedPatterns) {
+    const quality = BOOST_QUALITY_MAP[patternId];
+    if (quality) qualityCounts[quality]++;
+  }
+  const boosted = new Set<IsoQuality>();
+  for (const [quality, count] of Object.entries(qualityCounts)) {
+    if (count >= 2) boosted.add(quality as IsoQuality);
+  }
+  return boosted;
+}
+
+/** ruleId prefix -> quality 차원 (예: 'RTE-001' -> 'Reliability') */
+function getRuleQuality(ruleId: string): IsoQuality | undefined {
+  const prefix = ruleId.replace(/-\d+$/, '');
+  return RULE_PREFIX_TO_QUALITY[prefix];
+}
+
+/** confidence를 1단계 하향 (high->medium, medium->low, low 유지) */
+function downgradeConfidence(confidence: string): string {
+  if (confidence === 'high') return 'medium';
+  if (confidence === 'medium') return 'low';
+  return confidence;
+}
+
+// ============================================================
 // PART 4 — Context Builder
 // ============================================================
 
@@ -448,9 +647,13 @@ export function runFalsePositiveFilter(
   const context = buildContext(filePath, code);
   const kept: FilteredFinding[] = [];
   const dismissed: FilterResult['dismissed'] = [];
-  const stats = { total: findings.length, stage1: 0, stage2: 0, stage3: 0, stage4: 0, kept: 0 };
+  const stats = {
+    total: findings.length,
+    stage1: 0, stage2: 0, stage3: 0, stage4: 0, stage5: 0,
+    kept: 0, boostDowngrades: 0,
+  };
 
-  // Stage 5: 양품 패턴 감지 → suppress-fp
+  // Stage 5a: 양품 패턴 감지 → suppress-fp (dismiss)
   const goodPatterns = detectGoodPatterns(code);
   const suppressedRuleIds = new Set<string>();
   for (const [goodId, badIds] of Object.entries(SUPPRESS_MAP)) {
@@ -459,13 +662,16 @@ export function runFalsePositiveFilter(
     }
   }
 
+  // Stage 5b: boost 신호 → 건전한 quality 차원 계산
+  const boostedQualities = computeBoostedQualities(goodPatterns);
+
   for (const finding of findings) {
     let isDismissed = false;
 
-    // Stage 5: 양품 패턴이 억제하는 ruleId
+    // Stage 5a: 양품 패턴이 억제하는 ruleId (suppress-fp)
     if (finding.ruleId && suppressedRuleIds.has(finding.ruleId)) {
-      dismissed.push({ ...finding, dismissReason: `[GOOD-SUPPRESS] 양품 패턴이 존재하여 오탐 가능성 낮음`, stage: 5 as any });
-      stats.stage4++; // stage5는 stats에 없으니 stage4에 합산
+      dismissed.push({ ...finding, dismissReason: `[GOOD-SUPPRESS] 양품 패턴이 존재하여 오탐 가능성 낮음`, stage: 5 });
+      stats.stage5++;
       isDismissed = true;
     }
 
@@ -493,6 +699,26 @@ export function runFalsePositiveFilter(
           }
         }
       } catch { /* 카탈로그 없으면 skip */ }
+
+      // Stage 5b: boost confidence 하향 — 같은 quality 차원에 boost 패턴이 있으면
+      // confidence를 1단계 낮춤 (코드베이스가 해당 영역에서 건전성을 보이므로)
+      if (finding.ruleId && boostedQualities.size > 0) {
+        const findingQuality = getRuleQuality(finding.ruleId);
+        if (findingQuality && boostedQualities.has(findingQuality)) {
+          const before = finding.confidence;
+          finding.confidence = downgradeConfidence(finding.confidence);
+          if (before !== finding.confidence) {
+            stats.boostDowngrades++;
+            // evidence에 boost 적용 기록 추가
+            if (!finding.evidence) finding.evidence = [];
+            finding.evidence.push({
+              engine: 'boost-signal',
+              detail: `[BOOST] ${findingQuality} 차원 양품 패턴 감지 → confidence ${before}->${finding.confidence}`,
+            });
+          }
+        }
+      }
+
       kept.push(finding);
     }
   }
@@ -514,6 +740,8 @@ export function printFilterSummary(result: FilterResult): string {
   if (result.stats.stage2 > 0) lines.push(`    Stage 2 문법: ${result.stats.stage2}건 (문자열/주석/CSS)`);
   if (result.stats.stage3 > 0) lines.push(`    Stage 3 컨텍스트: ${result.stats.stage3}건 (catch/mock/useRef)`);
   if (result.stats.stage4 > 0) lines.push(`    Stage 4 자기참조: ${result.stats.stage4}건 (규칙 코드)`);
+  if (result.stats.stage5 > 0) lines.push(`    Stage 5a suppress: ${result.stats.stage5}건 (양품 패턴 억제)`);
+  if (result.stats.boostDowngrades > 0) lines.push(`    Stage 5b boost: ${result.stats.boostDowngrades}건 confidence 하향 (양품 차원 건전성)`);
 
   return lines.join('\n');
 }

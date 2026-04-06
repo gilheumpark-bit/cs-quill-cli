@@ -1,25 +1,33 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { CallExpression, SyntaxKind, type SourceFile } from 'ts-morph';
 
 /**
- * Phase / Rule Category: test
+ * TST-001: 빈 테스트 — assertion 없음
+ * it()/test() 블록 내부에 expect/assert/should 호출이 없으면 보고.
  */
 export const tst001Detector: RuleDetector = {
   ruleId: 'TST-001',
-  detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
-    sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('test')) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'TST-001 위반 의심' 
+  detect(sourceFile: SourceFile) {
+    const findings: Array<{ line: number; message: string }> = [];
+    const assertRe = /\b(expect|assert|should|verify|check)\s*[\(.]/;
+
+    sourceFile.forEachDescendant((node) => {
+      if (node.getKind() !== SyntaxKind.CallExpression) return;
+      const call = node as CallExpression;
+      const callee = call.getExpression().getText();
+      if (!/^(it|test)$/.test(callee)) return;
+
+      const args = call.getArguments();
+      const cb = args[1];
+      if (!cb) return;
+      const body = cb.getText();
+      if (!assertRe.test(body)) {
+        findings.push({
+          line: call.getStartLineNumber(),
+          message: 'it()/test() 블록에 expect/assert 호출 없음 — 빈 테스트',
         });
       }
     });
-
     return findings;
-  }
+  },
 };

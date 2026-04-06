@@ -15,8 +15,8 @@ beforeAll((done) => {
   setTimeout(done, 1000); // 서버 시작 대기
 });
 
-afterAll(() => {
-  daemonProcess?.stop();
+afterAll(async () => {
+  if (daemonProcess) await daemonProcess.stop();
 });
 
 // ============================================================

@@ -4,6 +4,67 @@
 // Plan → SEAL 계약 → 병렬 생성의 첫 단계.
 // 태스크를 N개 PART로 분해하고 각 PART의 계약을 정의한다.
 
+const { GOOD_PATTERN_CATALOG } = require('../core/good-pattern-catalog');
+
+// ============================================================
+// Quality Section Builder — good-pattern-catalog → compact checklist
+// ============================================================
+
+function buildPlannerQualitySection(): string {
+  type IsoQuality = 'Maintainability' | 'Reliability' | 'Security' | 'Performance';
+
+  // Filter to boost + high-confidence patterns only
+  const topPatterns = GOOD_PATTERN_CATALOG.filter(
+    (p: any) => p.signal === 'boost' && p.confidence === 'high',
+  );
+
+  // Group by ISO quality dimension
+  const grouped: Record<IsoQuality, string[]> = {
+    Maintainability: [],
+    Reliability: [],
+    Security: [],
+    Performance: [],
+  };
+
+  for (const p of topPatterns) {
+    const dim = p.quality as IsoQuality;
+    if (grouped[dim]) {
+      grouped[dim].push(p.title);
+    }
+  }
+
+  // Cap total rules at 20: distribute proportionally, min 3 per dimension
+  const MAX_RULES = 20;
+  const dims = Object.keys(grouped) as IsoQuality[];
+  const total = dims.reduce((s, d) => s + grouped[d].length, 0);
+  const selected: Record<IsoQuality, string[]> = {
+    Maintainability: [],
+    Reliability: [],
+    Security: [],
+    Performance: [],
+  };
+
+  let remaining = MAX_RULES;
+  for (const dim of dims) {
+    const quota = Math.max(3, Math.round((grouped[dim].length / total) * MAX_RULES));
+    const take = Math.min(quota, grouped[dim].length, remaining);
+    selected[dim] = grouped[dim].slice(0, take);
+    remaining -= take;
+    if (remaining <= 0) break;
+  }
+
+  const lines = ['QUALITY DIMENSIONS (apply during PART design):'];
+  for (const dim of dims) {
+    if (selected[dim].length > 0) {
+      lines.push(`[${dim}] ${selected[dim].join(', ')}`);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+const PLANNER_QUALITY_SECTION = buildPlannerQualitySection();
+
 // ============================================================
 // PART 1 — Types
 // ============================================================
@@ -51,6 +112,8 @@ SIZE RULES:
 - 50-100 lines → 2-3 PARTs
 - 100-300 lines → 3-5 PARTs
 - 300+ lines → 5-7 PARTs
+
+${PLANNER_QUALITY_SECTION}
 
 OUTPUT FORMAT (JSON only, no markdown):
 {

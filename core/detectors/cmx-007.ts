@@ -1,25 +1,42 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { SyntaxKind, Node } from 'ts-morph';
 
 /**
- * Phase / Rule Category: complexity
+ * CMX-007: 중첩 깊이 5단 초과
+ * Detects code blocks nested deeper than 5 levels.
  */
 export const cmx007Detector: RuleDetector = {
   ruleId: 'CMX-007',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
-    sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'CMX-007 위반 의심' 
-        });
+    const findings: Array<{line: number; message: string}> = [];
+    const MAX_DEPTH = 5;
+    const nestingKinds = new Set([
+      SyntaxKind.IfStatement,
+      SyntaxKind.ForStatement,
+      SyntaxKind.ForInStatement,
+      SyntaxKind.ForOfStatement,
+      SyntaxKind.WhileStatement,
+      SyntaxKind.DoStatement,
+      SyntaxKind.SwitchStatement,
+      SyntaxKind.TryStatement,
+    ]);
+
+    function measureDepth(node: Node, depth: number) {
+      if (nestingKinds.has(node.getKind())) {
+        depth++;
+        if (depth > MAX_DEPTH) {
+          findings.push({
+            line: node.getStartLineNumber(),
+            message: `중첩 깊이가 ${depth}단으로 ${MAX_DEPTH}단 제한을 초과합니다.`,
+          });
+          return; // don't report deeper children of same branch
+        }
       }
-    });
+      node.forEachChild(child => measureDepth(child, depth));
+    }
+
+    sourceFile.forEachChild(child => measureDepth(child, 0));
 
     return findings;
-  }
+  },
 };

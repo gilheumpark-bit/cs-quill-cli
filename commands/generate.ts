@@ -113,6 +113,44 @@ function deduplicateImports(code: string): string {
 // IDENTITY_SEAL: PART-3 | role=code-merger | inputs=GeneratedPart[] | outputs=string
 
 // ============================================================
+// PART 3.5 — Dynamic Quality Rules from Good Pattern Catalog
+// ============================================================
+
+const { GOOD_PATTERN_CATALOG } = require('../core/good-pattern-catalog');
+
+function buildQualityRulesFromCatalog(): string {
+  const filtered = GOOD_PATTERN_CATALOG.filter(
+    (p: { signal: string; confidence: string }) => p.signal === 'boost' && p.confidence === 'high',
+  );
+
+  const groups: Record<string, string[]> = {};
+  for (const p of filtered) {
+    const dim = p.quality as string;
+    if (!groups[dim]) groups[dim] = [];
+    groups[dim].push(`- ${p.title}`);
+  }
+
+  const sections: string[] = [];
+  const order = ['Maintainability', 'Reliability', 'Security', 'Performance'];
+  let count = 0;
+  for (const dim of order) {
+    const rules = groups[dim];
+    if (!rules || rules.length === 0) continue;
+    sections.push(`[${dim}]`);
+    for (const rule of rules) {
+      if (count >= 40) break;
+      sections.push(rule);
+      count++;
+    }
+    if (count >= 40) break;
+  }
+
+  return `QUALITY RULES (mandatory):\n${sections.join('\n')}`;
+}
+
+// IDENTITY_SEAL: PART-3.5 | role=quality-rules-builder | inputs=GOOD_PATTERN_CATALOG | outputs=string
+
+// ============================================================
 // PART 4 — Main Generate Flow
 // ============================================================
 
@@ -283,21 +321,7 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
         let code = '';
         await streamChat({
-          systemInstruction: `You are a code generator. Follow the SEAL contract exactly. Output only code.
-
-QUALITY RULES (mandatory):
-- Use const over let. Never use var.
-- Functions ≤ 20 lines, parameters ≤ 3 (use options object if more).
-- Early return / Guard clause — no deep nesting.
-- async/await only (no .then()). Use Promise.all for parallel.
-- try-catch-finally on all async operations.
-- No any type. Use unknown + type guards.
-- No eval(), no new Function(), no innerHTML.
-- No hardcoded secrets. Use process.env.
-- No console.log in library code (only in CLI commands).
-- Optional chaining ?. and nullish coalescing ?? for null safety.
-- Meaningful names: verbs for functions, nouns for types, is/has for booleans.
-- PART structure: each function has single responsibility.`,
+          systemInstruction: `You are a code generator. Follow the SEAL contract exactly. Output only code.\n\n${buildQualityRulesFromCatalog()}`,
           messages: [{ role: 'user', content: genPrompt }],
           onChunk: (t: string) => { code += t; },
         });

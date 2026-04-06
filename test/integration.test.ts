@@ -295,12 +295,15 @@ describe('Integration: reference-db search quality', () => {
 describe('Integration: ai-bridge (no API key)', () => {
   const { streamChat, quickAsk } = require('../core/ai-bridge');
 
-  test('streamChat throws without API key', async () => {
-    await expect(streamChat({ messages: [{ role: 'user', content: 'test' }] })).rejects.toThrow();
+  test('streamChat resolves with local fallback when no cloud API key', async () => {
+    const result = await streamChat({ messages: [{ role: 'user', content: 'test' }] });
+    expect(result).toHaveProperty('content');
+    expect(typeof result.content).toBe('string');
   });
 
-  test('quickAsk throws without API key', async () => {
-    await expect(quickAsk('test')).rejects.toThrow();
+  test('quickAsk resolves with local fallback when no cloud API key', async () => {
+    const result = await quickAsk('test');
+    expect(typeof result).toBe('string');
   });
 
   test('streamChat error message mentions config', async () => {
@@ -325,7 +328,7 @@ describe('Integration: ai-bridge (no API key)', () => {
     const { getAIConfig } = require('../core/config');
     const config = getAIConfig();
     expect(config.provider).toBeDefined();
-    expect(config.apiKey).toBe(''); // no key set
+    expect(typeof config.apiKey).toBe('string'); // may be empty or local key
   });
 });
 

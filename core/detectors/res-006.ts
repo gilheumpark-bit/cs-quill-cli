@@ -1,22 +1,29 @@
 import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
-/**
- * Phase / Rule Category: resource
- */
 export const res006Detector: RuleDetector = {
   ruleId: 'RES-006',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
+    const findings: Array<{line: number; message: string}> = [];
+    const fullText = sourceFile.getFullText();
+    const hasRemoveListener = fullText.includes('removeListener') ||
+                              fullText.includes('removeAllListeners') ||
+                              fullText.includes('.off(');
+    const hasMaxListeners = fullText.includes('setMaxListeners');
+
     sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'RES-006 위반 의심' 
-        });
+      if (node.getKind() === SyntaxKind.CallExpression) {
+        const text = node.getText();
+        // EventEmitter .on() / .addListener() pattern
+        if ((/\.on\s*\(/.test(text) || /\.addListener\s*\(/.test(text)) &&
+            !text.includes('once')) {
+          if (!hasRemoveListener && !hasMaxListeners) {
+            findings.push({
+              line: node.getStartLineNumber(),
+              message: 'EventEmitter에 리스너를 등록하지만 removeListener/off 호출이 보이지 않습니다. 리스너 누수(leak) 가능성이 있습니다.',
+            });
+          }
+        }
       }
     });
 

@@ -4,6 +4,8 @@
 // 팀장은 에이전트 보고를 받아 1회 판정만 한다.
 // 에이전트 간 대화 금지. 보고만 받고 판정만.
 
+const { GOOD_PATTERN_CATALOG } = require('../core/good-pattern-catalog');
+
 // ============================================================
 // PART 1 — Types
 // ============================================================
@@ -52,6 +54,7 @@ DISMISS if:
 - The finding is about console.log in a CLI/Node.js tool (expected)
 - The finding is about CSS values like "50%", "translateX(-50%)" (not code issues)
 - The finding is about article/fiction content strings containing "임시", "미완성" (story text, not TODO)
+- The code contains recognized GOOD PATTERNS that directly address the finding (e.g., try-catch-finally handles error concerns, type narrowing with typeof/instanceof handles null-safety concerns, guard clauses handle complexity concerns, const preference handles mutation concerns, Promise.all handles async-performance concerns). If [GOOD PATTERNS DETECTED] is listed below, cross-reference them against the finding before keeping it.
 
 KEEP only if:
 - Actual runtime bug risk (real null deref, real eval call, real empty function needing logic)
@@ -70,10 +73,69 @@ OUTPUT FORMAT (JSON only):
 // IDENTITY_SEAL: PART-2 | role=system-prompt | inputs=none | outputs=TEAM_LEAD_SYSTEM_PROMPT
 
 // ============================================================
-// PART 3 — Verdict Builder
+// PART 3 — Good Pattern Detection
 // ============================================================
 
-export function buildTeamLeadPrompt(findings: AgentFinding[]): string {
+interface DetectedPattern {
+  id: string;
+  title: string;
+  suppresses: string[];
+}
+
+const GOOD_PATTERN_CHECKS: Array<{ regex: RegExp; catalogIds: string[] }> = [
+  { regex: /try\s*\{[\s\S]*?catch[\s\S]*?finally/,          catalogIds: ['GQ-AS-005'] },
+  { regex: /try\s*\{[\s\S]*?catch/,                          catalogIds: ['GQ-EH-003'] },
+  { regex: /typeof\s+\w+\s*[!=]==?\s*['"`]/,                 catalogIds: ['GQ-NL-010'] },
+  { regex: /instanceof\s+\w+/,                               catalogIds: ['GQ-EH-002'] },
+  { regex: /if\s*\([^)]*\)\s*(return|throw)\b/,              catalogIds: ['GQ-FN-004'] },
+  { regex: /\bconst\s+\w+/,                                  catalogIds: ['GQ-FN-009'] },
+  { regex: /Promise\.all\s*\(/,                               catalogIds: ['GQ-AS-002'] },
+  { regex: /Promise\.allSettled\s*\(/,                        catalogIds: ['GQ-AS-003'] },
+  { regex: /\?\./,                                            catalogIds: ['GQ-NL-001'] },
+  { regex: /\?\?/,                                            catalogIds: ['GQ-NL-002'] },
+  { regex: /async\s+function|async\s*\(/,                     catalogIds: ['GQ-AS-001'] },
+  { regex: /\.filter\s*\([\s\S]*?\.map\s*\(/,                catalogIds: ['GQ-FN-008'] },
+  { regex: /readonly\s+/,                                     catalogIds: ['GQ-TS-005'] },
+  { regex: /Array\.isArray\s*\(/,                             catalogIds: ['GQ-NL-006'] },
+  { regex: /Number\.isNaN\s*\(/,                              catalogIds: ['GQ-NL-008'] },
+  { regex: /AbortController/,                                 catalogIds: ['GQ-AS-004'] },
+  { regex: /as\s+const\b/,                                    catalogIds: ['GQ-TS-011'] },
+];
+
+function detectGoodPatterns(code: string): DetectedPattern[] {
+  const catalogMap = new Map<string, typeof GOOD_PATTERN_CATALOG[number]>();
+  for (const entry of GOOD_PATTERN_CATALOG) {
+    catalogMap.set(entry.id, entry);
+  }
+
+  const seen = new Set<string>();
+  const detected: DetectedPattern[] = [];
+
+  for (const check of GOOD_PATTERN_CHECKS) {
+    if (check.regex.test(code)) {
+      for (const catId of check.catalogIds) {
+        if (seen.has(catId)) continue;
+        seen.add(catId);
+        const meta = catalogMap.get(catId);
+        if (meta) {
+          detected.push({
+            id: meta.id,
+            title: meta.title,
+            suppresses: meta.suppresses ?? [],
+          });
+        }
+      }
+    }
+  }
+
+  return detected;
+}
+
+// ============================================================
+// PART 4 — Verdict Builder
+// ============================================================
+
+export function buildTeamLeadPrompt(findings: AgentFinding[], code?: string): string {
   const grouped = new Map<string, AgentFinding[]>();
 
   for (const f of findings) {
@@ -95,6 +157,23 @@ export function buildTeamLeadPrompt(findings: AgentFinding[]): string {
   }
 
   lines.push(`\nTotal: ${findings.length} findings from ${new Set(findings.map(f => f.agentId)).size} agents.`);
+
+  // Append detected good patterns as dismiss evidence
+  if (code) {
+    const detected = detectGoodPatterns(code);
+    if (detected.length > 0) {
+      const names = detected.map(d => d.title).join(', ');
+      lines.push(`\n[GOOD PATTERNS DETECTED]: ${names}`);
+
+      const allSuppressed = detected.flatMap(d => d.suppresses).filter(Boolean);
+      if (allSuppressed.length > 0) {
+        lines.push(`[SUPPRESSED RULE IDs]: ${[...new Set(allSuppressed)].join(', ')}`);
+      }
+
+      lines.push('Cross-reference these patterns against findings before judging — dismiss findings that are directly addressed by detected good patterns.');
+    }
+  }
+
   lines.push('Make your judgment.');
 
   return lines.join('\n');
@@ -110,4 +189,5 @@ export function parseVerdict(raw: string): TeamLeadVerdict | null {
   }
 }
 
-// IDENTITY_SEAL: PART-3 | role=verdict-builder | inputs=AgentFinding[] | outputs=TeamLeadVerdict
+// IDENTITY_SEAL: PART-3 | role=good-pattern-detection | inputs=code:string | outputs=DetectedPattern[]
+// IDENTITY_SEAL: PART-4 | role=verdict-builder | inputs=AgentFinding[],code? | outputs=TeamLeadVerdict

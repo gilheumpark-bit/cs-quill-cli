@@ -4,6 +4,8 @@
 // 생성 모델과 검증 모델의 결과를 독립적으로 판단하는 심판.
 // 다른 모델이 크로스체크해서 오탐/정탐 분류.
 
+const { getSuppressorsFor, GOOD_PATTERN_CATALOG } = require('../core/good-pattern-catalog');
+
 // ============================================================
 // PART 1 — Types
 // ============================================================
@@ -51,6 +53,13 @@ CLASSIFICATION RULES (follow strictly):
    - Style issues (line length, naming)
    - Informational (TODO comments, type annotations)
 
+GOOD PATTERN AWARENESS:
+When the code contains recognized quality patterns (guard clauses, try-catch-finally,
+type narrowing, readonly modifiers, discriminated unions, etc.), related findings are
+MORE LIKELY to be false positives. Look for [GOOD-PATTERN] notes below each finding.
+If a finding has associated good patterns, weigh them as evidence toward "dismiss".
+A finding with multiple matching good patterns is almost certainly a false positive.
+
 OUTPUT FORMAT (JSON only, one verdict per finding):
 {
   "findings": [
@@ -67,9 +76,15 @@ OUTPUT FORMAT (JSON only, one verdict per finding):
 // PART 3 — Judge Prompt Builder
 // ============================================================
 
+/** Extract ruleId pattern (e.g. ERR-001, CMX-007, STL-002) from message text */
+function extractRuleIdFromMessage(message: string): string | null {
+  const match = message.match(/\b([A-Z]{2,4}-\d{3})\b/);
+  return match ? match[1] : null;
+}
+
 export function buildJudgePrompt(
   code: string,
-  findings: Array<{ id: string; severity: string; message: string; file: string; line: number; engine?: string; confidence?: number; team?: string }>,
+  findings: Array<{ id: string; severity: string; message: string; file: string; line: number; engine?: string; confidence?: number; team?: string; ruleId?: string }>,
 ): string {
   const lines: string[] = [
     '=== GENERATED CODE ===',
@@ -100,6 +115,16 @@ export function buildJudgePrompt(
       const eng = f.engine ? ` [${f.engine}]` : '';
       lines.push(`[${f.id}] ${f.severity.toUpperCase()} — ${f.file}:${f.line}${eng}${conf}`);
       lines.push(`  ${f.message}`);
+
+      // Good-pattern suppressor lookup
+      const effectiveRuleId = f.ruleId ?? extractRuleIdFromMessage(f.message);
+      if (effectiveRuleId) {
+        const suppressors = getSuppressorsFor(effectiveRuleId);
+        if (suppressors.length > 0) {
+          const titles = suppressors.map((s: { title: string }) => s.title).join(', ');
+          lines.push(`  [GOOD-PATTERN] This code contains good patterns [${titles}] that may make finding ${effectiveRuleId} a false positive`);
+        }
+      }
     }
     lines.push('');
   }

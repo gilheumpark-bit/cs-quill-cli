@@ -1,25 +1,26 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: complexity
+ * CMX-013: 줄 120자 초과
+ * Detects lines exceeding 120 characters.
  */
 export const cmx013Detector: RuleDetector = {
   ruleId: 'CMX-013',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // AST 탐색 스캐폴딩 
-    sourceFile.forEachDescendant(node => {
-      // 휴리스틱 임시 블록
-      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
-        findings.push({ 
-          line: node.getStartLineNumber(), 
-          message: 'CMX-013 위반 의심' 
+    const findings: Array<{line: number; message: string}> = [];
+    const MAX_LENGTH = 120;
+
+    const lines = sourceFile.getFullText().split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const len = lines[i].replace(/\r$/, '').length;
+      if (len > MAX_LENGTH) {
+        findings.push({
+          line: i + 1,
+          message: `줄 길이가 ${len}자로 ${MAX_LENGTH}자 제한을 초과합니다.`,
         });
       }
-    });
+    }
 
     return findings;
-  }
+  },
 };

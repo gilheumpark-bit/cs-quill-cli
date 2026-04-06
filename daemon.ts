@@ -598,7 +598,9 @@ export function startDaemon(config: Partial<DaemonConfig> = {}): { stop: () => v
         // Close frame
         if (frame.opcode === 0x08) {
           tracker.remove(session.id);
-          console.log(`  🔌 종료: ${session.id} (총 ${tracker.count()})`);
+          if (!isStopping) {
+            console.log(`  🔌 종료: ${session.id} (총 ${tracker.count()})`);
+          }
           return;
         }
 
@@ -627,7 +629,9 @@ export function startDaemon(config: Partial<DaemonConfig> = {}): { stop: () => v
 
     socket.on('close', () => {
       tracker.remove(session.id);
-      console.log(`  🔌 종료: ${session.id} (총 ${tracker.count()})`);
+      if (!isStopping) {
+        console.log(`  🔌 종료: ${session.id} (총 ${tracker.count()})`);
+      }
     });
 
     socket.on('error', () => {
@@ -649,11 +653,27 @@ export function startDaemon(config: Partial<DaemonConfig> = {}): { stop: () => v
     console.log(`\n  Ctrl+C 로 종료\n`);
   });
 
+  let isStopping = false;
+
   return {
     stop: () => {
+      isStopping = true;
       clearInterval(cleanupInterval);
-      for (const s of tracker.getAll()) tracker.remove(s.id);
-      server.close();
+      
+      const sockets = tracker.getAll();
+      for (const s of sockets) {
+        tracker.remove(s.id);
+      }
+
+      return new Promise<void>((resolve, reject) => {
+        server.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+        
+        // Also force close all idle HTTP keep-alive connections
+        server.closeAllConnections();
+      });
     },
   };
 }

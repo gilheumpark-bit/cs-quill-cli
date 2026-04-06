@@ -1,0 +1,59 @@
+{
+  "id": "cs-v-mnmmad47",
+  "timestamp": 1775445294823,
+  "codeHash": "da4ea2a5506f2693eae190d9360a1f31793c98a1adade51d93533a6f520ace1c",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "governance",
+        "score": 53,
+        "blocking": false,
+        "findings": 15,
+        "passed": true
+      },
+      {
+        "name": "validation",
+        "score": 53,
+        "blocking": true,
+        "findings": 15,
+        "passed": false
+      },
+      {
+        "name": "simulation",
+        "score": 53,
+        "blocking": false,
+        "findings": 2,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 53,
+        "blocking": false,
+        "findings": 15,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 53,
+        "blocking": false,
+        "findings": 15,
+        "passed": true
+      },
+      {
+        "name": "stability",
+        "score": 53,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      }
+    ],
+    "overallScore": 60,
+    "overallStatus": "review"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "398ef89cad9931882c4302fee2586645497206e9efd36901230199df9de2f7ff"
+}
