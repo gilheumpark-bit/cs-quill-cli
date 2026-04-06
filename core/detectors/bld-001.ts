@@ -2,13 +2,13 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: style
+ * Phase / Rule Category: config (build/tooling)
  */
-export const stl002Detector: RuleDetector = {
-  ruleId: 'STL-002', // 함수명 동사 없음
+export const bld001Detector: RuleDetector = {
+  ruleId: 'BLD-001', // strict: false
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
-    // 정규식 등 영어 품사 판별 필요
+    // tsconfig.json 체크용이므로 소스코드 레벨에서는 보통 스킵
     return findings;
   }
 };

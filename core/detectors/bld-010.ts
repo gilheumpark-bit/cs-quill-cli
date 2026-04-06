@@ -2,13 +2,13 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: style
+ * Phase / Rule Category: config (build/tooling)
  */
-export const stl002Detector: RuleDetector = {
-  ruleId: 'STL-002', // 함수명 동사 없음
+export const bld010Detector: RuleDetector = {
+  ruleId: 'BLD-010', // .env git 추적 포함
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
-    // 정규식 등 영어 품사 판별 필요
+    // .gitignore 체크
     return findings;
   }
 };

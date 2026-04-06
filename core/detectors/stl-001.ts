@@ -3,22 +3,18 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: medium | Confidence: high
  */
 export const stl001Detector: RuleDetector = {
   ruleId: 'STL-001', // 단일 문자 변수명 혼동
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 단일 문자 변수명 혼동
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '단일 문자 변수명 혼동 위반' });
-      // }
+    sourceFile.getVariableDeclarations().forEach(decl => {
+      const name = decl.getName();
+      if (name.length === 1 && !['i', 'j', 'k', '_', 'e'].includes(name)) {
+        findings.push({ line: decl.getStartLineNumber(), message: '단일 문자 변수명 위반: ' + name });
+      }
     });
-    */
-
     return findings;
   }
 };
