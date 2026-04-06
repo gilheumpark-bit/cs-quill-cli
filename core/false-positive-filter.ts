@@ -191,13 +191,68 @@ const FP_CHECKLIST: FPRule[] = [
 ];
 
 // ============================================================
-// PART 3 — Context Builder
+// PART 3 — Stage 5: Good Pattern Suppress-FP
+// ============================================================
+
+/**
+ * 양품 패턴이 감지된 코드에서 관련 불량 findings의 confidence를 낮추거나 제거.
+ * "타입 narrowing이 있으면 null dereference 오탐 가능성이 낮다"
+ */
+function detectGoodPatterns(code: string): Set<string> {
+  const detected = new Set<string>();
+
+  // GQ-NL-010: 타입 narrowing → RTE-001,002,003 억제
+  if (/!==\s*(null|undefined)|typeof\s+\w+\s*[!=]==/.test(code)) detected.add('GQ-NL-010');
+
+  // GQ-TS-001: strict: true → TYP-012,013,014 억제
+  // (tsconfig는 별도 체크이므로 파일 내 strict 관련 패턴만)
+
+  // GQ-AS-005: try-catch-finally → ASY-003 억제
+  if (/try\s*\{[\s\S]*?catch[\s\S]*?finally/.test(code)) detected.add('GQ-AS-005');
+
+  // GQ-EH-003: catch에서 복구 또는 재throw → ERR-001,002 억제
+  if (/catch\s*\([^)]*\)\s*\{[^}]*throw/.test(code)) detected.add('GQ-EH-003');
+
+  // GQ-FN-004: Early return / Guard clause → CMX-007 억제
+  if (/^\s*if\s*\([^)]*\)\s*(return|throw)\b/m.test(code)) detected.add('GQ-FN-004');
+
+  // GQ-FN-009: const 우선 → VAR-008 억제
+  const constCount = (code.match(/\bconst\b/g) || []).length;
+  const letCount = (code.match(/\blet\b/g) || []).length;
+  if (constCount > letCount * 3) detected.add('GQ-FN-009');
+
+  // GQ-AS-002: Promise.all → ASY-002, PRF-004 억제
+  if (/Promise\.all\s*\(/.test(code)) detected.add('GQ-AS-002');
+
+  // GQ-SC-003: process.env 사용 → SEC-009 억제
+  if (/process\.env\.\w+/.test(code) && !/sk-[a-zA-Z]{20}|AIza/.test(code)) detected.add('GQ-SC-003');
+
+  // GQ-NL-007: JSON.parse try-catch → RTE-008 억제
+  if (/try\s*\{[^}]*JSON\.parse/.test(code)) detected.add('GQ-NL-007');
+
+  return detected;
+}
+
+/** 양품→불량 억제 매핑 (good-pattern-catalog의 suppresses와 동일) */
+const SUPPRESS_MAP: Record<string, string[]> = {
+  'GQ-NL-010': ['RTE-001', 'RTE-002', 'RTE-003'],
+  'GQ-AS-005': ['ASY-003', 'ERR-010'],
+  'GQ-EH-003': ['ERR-001', 'ERR-002'],
+  'GQ-FN-004': ['CMX-007'],
+  'GQ-FN-009': ['VAR-008'],
+  'GQ-AS-002': ['ASY-002', 'PRF-004'],
+  'GQ-SC-003': ['SEC-009', 'SEC-010'],
+  'GQ-NL-007': ['RTE-008'],
+};
+
+// ============================================================
+// PART 4 — Context Builder
 // ============================================================
 
 function buildContext(filePath: string, code: string): FilterContext {
   const isCliTool = /commands\/|bin\/|core\/|adapters\/|daemon|formatters\/|tui\//.test(filePath);
   const isTestFile = /test|spec|__tests__|\.test\.|\.spec\./.test(filePath);
-  const isRuleDefinition = /pipeline-bridge|ast-bridge|ast-engine|deep-verify|quill-engine|verify-orchestrator|cross-judge|team-lead/.test(filePath);
+  const isRuleDefinition = /pipeline-bridge|ast-bridge|ast-engine|deep-verify|quill-engine|verify-orchestrator|cross-judge|team-lead|rule-catalog|good-pattern|false-positive/.test(filePath);
 
   return { filePath, code, isCliTool, isTestFile, isRuleDefinition };
 }
@@ -216,10 +271,26 @@ export function runFalsePositiveFilter(
   const dismissed: FilterResult['dismissed'] = [];
   const stats = { total: findings.length, stage1: 0, stage2: 0, stage3: 0, stage4: 0, kept: 0 };
 
+  // Stage 5: 양품 패턴 감지 → suppress-fp
+  const goodPatterns = detectGoodPatterns(code);
+  const suppressedRuleIds = new Set<string>();
+  for (const [goodId, badIds] of Object.entries(SUPPRESS_MAP)) {
+    if (goodPatterns.has(goodId)) {
+      for (const badId of badIds) suppressedRuleIds.add(badId);
+    }
+  }
+
   for (const finding of findings) {
     let isDismissed = false;
 
-    for (const rule of FP_CHECKLIST) {
+    // Stage 5: 양품 패턴이 억제하는 ruleId
+    if (finding.ruleId && suppressedRuleIds.has(finding.ruleId)) {
+      dismissed.push({ ...finding, dismissReason: `[GOOD-SUPPRESS] 양품 패턴이 존재하여 오탐 가능성 낮음`, stage: 5 as any });
+      stats.stage4++; // stage5는 stats에 없으니 stage4에 합산
+      isDismissed = true;
+    }
+
+    if (!isDismissed) for (const rule of FP_CHECKLIST) {
       if (rule.check(finding, context)) {
         dismissed.push({ ...finding, dismissReason: `[${rule.id}] ${rule.description}`, stage: rule.stage });
         if (rule.stage === 1) stats.stage1++;
@@ -232,6 +303,17 @@ export function runFalsePositiveFilter(
     }
 
     if (!isDismissed) {
+      // 카탈로그 정책: hint 등급 규칙은 confidence를 low로 하향
+      try {
+        const { getRule } = require('./rule-catalog');
+        if (finding.ruleId) {
+          const rule = getRule(finding.ruleId);
+          if (rule?.defaultAction === 'hint') {
+            finding.confidence = 'low';
+            finding.severity = rule.severity === 'info' ? 'info' : finding.severity;
+          }
+        }
+      } catch { /* 카탈로그 없으면 skip */ }
       kept.push(finding);
     }
   }

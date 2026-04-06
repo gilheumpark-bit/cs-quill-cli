@@ -205,7 +205,7 @@ export function analyzeWithProgram(
       if (body && ts.isBlock(body) && body.statements.length === 0) {
         const name = (node as any).name?.getText?.(sourceFile) ?? 'anonymous';
         addFinding({
-          ruleId: 'empty-function', line: lineOf(node),
+          ruleId: 'ERR-001', line: lineOf(node),
           message: `빈 함수: ${name}()`,
           severity: 'error', confidence: 'high',
           evidence: [{ engine: 'typescript-ast', detail: 'Block.statements.length === 0' }],
@@ -219,7 +219,7 @@ export function analyzeWithProgram(
         if (fnLines > 60) {
           const name = (node as any).name?.getText?.(sourceFile) ?? 'anonymous';
           addFinding({
-            ruleId: 'long-function', line: lineOf(node),
+            ruleId: 'CMX-001', line: lineOf(node),
             message: `함수 ${name}() ${fnLines}줄 — 60줄 초과`,
             severity: 'warning', confidence: 'high',
             evidence: [{ engine: 'typescript-ast', detail: `body span: ${fnLines} lines` }],
@@ -230,7 +230,7 @@ export function analyzeWithProgram(
       // 파라미터 과다
       if ('parameters' in node && (node as any).parameters.length > 5) {
         addFinding({
-          ruleId: 'too-many-params', line: lineOf(node),
+          ruleId: 'CMX-002', line: lineOf(node),
           message: `파라미터 ${(node as any).parameters.length}개 — 5개 초과`,
           severity: 'warning', confidence: 'high',
           evidence: [{ engine: 'typescript-ast', detail: 'parameters.length > 5' }],
@@ -245,7 +245,7 @@ export function analyzeWithProgram(
     // eval() / new Function() — AST 기반 정확 탐지
     if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'eval') {
       addFinding({
-        ruleId: 'security/eval', line: lineOf(node),
+        ruleId: 'SEC-006', line: lineOf(node),
         message: 'eval() 호출 — 보안 위험',
         severity: 'critical', confidence: 'high',
         evidence: [{ engine: 'typescript-ast', detail: 'CallExpression callee === eval' }],
@@ -253,7 +253,7 @@ export function analyzeWithProgram(
     }
     if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
       addFinding({
-        ruleId: 'security/new-function', line: lineOf(node),
+        ruleId: 'API-008', line: lineOf(node),
         message: 'new Function() — eval 동등',
         severity: 'critical', confidence: 'high',
         evidence: [{ engine: 'typescript-ast', detail: 'NewExpression callee === Function' }],
@@ -264,7 +264,7 @@ export function analyzeWithProgram(
     if (ts.isBinaryExpression(node)) {
       if (node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsToken) {
         addFinding({
-          ruleId: 'style/loose-equality', line: lineOf(node),
+          ruleId: 'LOG-001', line: lineOf(node),
           message: '== 사용 — === 권장',
           severity: 'warning', confidence: 'medium',
           evidence: [{ engine: 'typescript-ast', detail: 'BinaryExpression operator: ==' }],
@@ -272,7 +272,7 @@ export function analyzeWithProgram(
       }
       if (node.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsToken) {
         addFinding({
-          ruleId: 'style/loose-inequality', line: lineOf(node),
+          ruleId: 'LOG-002', line: lineOf(node),
           message: '!= 사용 — !== 권장',
           severity: 'warning', confidence: 'medium',
           evidence: [{ engine: 'typescript-ast', detail: 'BinaryExpression operator: !=' }],
@@ -295,7 +295,7 @@ export function analyzeWithProgram(
           if (!symbol && node.text !== 'this' && node.text !== 'super' &&
               node.text.length > 1 && !/^(true|false|null|undefined|NaN|Infinity)$/.test(node.text)) {
             addFinding({
-              ruleId: 'unresolved-symbol', line: lineOf(node),
+              ruleId: 'VAR-003', line: lineOf(node),
               message: `미해석 심볼: '${node.text}'`,
               severity: 'info', confidence: 'medium',
               evidence: [{ engine: 'typescript-checker', detail: 'getSymbolAtLocation returned null' }],
@@ -313,7 +313,7 @@ export function analyzeWithProgram(
   // Cyclomatic complexity 경고
   if (cyclomaticComplexity > 15) {
     addFinding({
-      ruleId: 'cognitive/cyclomatic', line: 1,
+      ruleId: 'CMX-008', line: 1,
       message: `순환 복잡도 ${cyclomaticComplexity} — 15 초과`,
       severity: 'warning', confidence: 'high',
       evidence: [{ engine: 'typescript-ast', detail: `if/for/while/case/&&/|| count: ${cyclomaticComplexity}` }],
@@ -333,7 +333,7 @@ export function analyzeWithProgram(
 
   if (maxScopeDepth > 5) {
     addFinding({
-      ruleId: 'structure/deep-nesting', line: 1,
+      ruleId: 'CMX-007', line: 1,
       message: `최대 스코프 깊이 ${maxScopeDepth} — 5 초과`,
       severity: 'warning', confidence: 'high',
       evidence: [{ engine: 'typescript-ast', detail: `scope graph depth: ${maxScopeDepth}` }],
@@ -359,7 +359,7 @@ export function analyzeWithEsquery(code: string): EngineFinding[] {
     const evalCalls = esquery.query(ast, 'CallExpression[callee.name="eval"]');
     for (const node of evalCalls) {
       findings.push({
-        ruleId: 'security/eval', line: (node as any).loc?.start?.line ?? 1,
+        ruleId: 'SEC-006', line: (node as any).loc?.start?.line ?? 1,
         message: 'eval() 호출 — 보안 위험',
         severity: 'critical', confidence: 'high',
         evidence: [{ engine: 'esquery', detail: 'CallExpression[callee.name="eval"]' }],
@@ -371,7 +371,7 @@ export function analyzeWithEsquery(code: string): EngineFinding[] {
       ':matches(ForStatement, WhileStatement, ForOfStatement) :matches(ForStatement, WhileStatement, ForOfStatement) :matches(ForStatement, WhileStatement, ForOfStatement)');
     if (tripleLoop.length > 0) {
       findings.push({
-        ruleId: 'perf/triple-loop', line: (tripleLoop[0] as any).loc?.start?.line ?? 1,
+        ruleId: 'PRF-002', line: (tripleLoop[0] as any).loc?.start?.line ?? 1,
         message: '3중 중첩 루프 — O(n³) 복잡도',
         severity: 'warning', confidence: 'high',
         evidence: [{ engine: 'esquery', detail: 'nested loop depth >= 3' }],

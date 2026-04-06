@@ -283,7 +283,21 @@ export async function runGenerate(prompt: string, opts: GenerateOptions): Promis
 
         let code = '';
         await streamChat({
-          systemInstruction: 'You are a code generator. Follow the SEAL contract exactly. Output only code.',
+          systemInstruction: `You are a code generator. Follow the SEAL contract exactly. Output only code.
+
+QUALITY RULES (mandatory):
+- Use const over let. Never use var.
+- Functions ≤ 20 lines, parameters ≤ 3 (use options object if more).
+- Early return / Guard clause — no deep nesting.
+- async/await only (no .then()). Use Promise.all for parallel.
+- try-catch-finally on all async operations.
+- No any type. Use unknown + type guards.
+- No eval(), no new Function(), no innerHTML.
+- No hardcoded secrets. Use process.env.
+- No console.log in library code (only in CLI commands).
+- Optional chaining ?. and nullish coalescing ?? for null safety.
+- Meaningful names: verbs for functions, nouns for types, is/has for booleans.
+- PART structure: each function has single responsibility.`,
           messages: [{ role: 'user', content: genPrompt }],
           onChunk: (t: string) => { code += t; },
         });
