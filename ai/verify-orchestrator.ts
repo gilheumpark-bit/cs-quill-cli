@@ -32,6 +32,7 @@ export interface OrchestrationMetrics {
   totalDurationMs: number;
   retries: { teamLead: number; crossJudge: number };
   parseFailures: { teamLead: number; crossJudge: number };
+  ari?: { provider: string; score: number; circuitState: string };
 }
 
 // IDENTITY_SEAL: PART-1 | role=types | inputs=none | outputs=OrchestratedResult,OrchestrationMetrics
@@ -238,7 +239,7 @@ export async function orchestrateVerify(
   },
   filePath: string,
 ): Promise<OrchestratedResult> {
-  const { streamChat } = require('../core/ai-bridge');
+  const { streamChat, updateARI, getARIReport } = require('../core/ai-bridge');
   const { getAIConfig } = require('../core/config');
   const { TEAM_LEAD_SYSTEM_PROMPT, buildTeamLeadPrompt } = require('./team-lead');
   const { CROSS_JUDGE_SYSTEM_PROMPT, buildJudgePrompt } = require('./cross-judge');
@@ -315,6 +316,16 @@ export async function orchestrateVerify(
   metrics.retries.teamLead = teamLeadCall.retries;
   metrics.parseFailures.teamLead = teamLeadCall.parseFailures;
 
+  // ARI update after team-lead call
+  try {
+    const teamLeadSuccess = verdict !== null;
+    updateARI(config.provider, teamLeadSuccess);
+    if (process.env.CS_DEBUG) {
+      const ariState = getARIReport().find((s: any) => s.provider === config.provider);
+      if (ariState) console.log(`  [ARI] team-lead ${teamLeadSuccess ? 'OK' : 'FAIL'} → ${config.provider} score=${ariState.score} circuit=${ariState.circuitState}`);
+    }
+  } catch { /* ARI update non-critical */ }
+
   // Step 3: Cross-Judge 오탐 필터
   const judgeFindingsInput = agentFindings.map((f, i) => ({
     id: `${f.agentId}-${i}`,
@@ -338,6 +349,24 @@ export async function orchestrateVerify(
   metrics.crossJudgeDurationMs = judgeCall.durationMs;
   metrics.retries.crossJudge = judgeCall.retries;
   metrics.parseFailures.crossJudge = judgeCall.parseFailures;
+
+  // ARI update after cross-judge call
+  try {
+    const judgeSuccess = judgeResult !== null;
+    updateARI(config.provider, judgeSuccess);
+    if (process.env.CS_DEBUG) {
+      const ariState = getARIReport().find((s: any) => s.provider === config.provider);
+      if (ariState) console.log(`  [ARI] cross-judge ${judgeSuccess ? 'OK' : 'FAIL'} → ${config.provider} score=${ariState.score} circuit=${ariState.circuitState}`);
+    }
+  } catch { /* ARI update non-critical */ }
+
+  // Capture ARI state in metrics
+  try {
+    const ariState = getARIReport().find((s: any) => s.provider === config.provider);
+    if (ariState) {
+      metrics.ari = { provider: ariState.provider, score: ariState.score, circuitState: ariState.circuitState };
+    }
+  } catch { /* ARI report non-critical */ }
 
   // Step 4: Merge dismissals from both AI stages
   const dismissedIds = new Set<string>();

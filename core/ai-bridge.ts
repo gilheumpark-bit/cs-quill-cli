@@ -128,6 +128,125 @@ const PROVIDERS: Record<string, ProviderConfig> = {
 // IDENTITY_SEAL: PART-2 | role=providers | inputs=none | outputs=PROVIDERS
 
 // ============================================================
+// PART 2.5 — ARI (Agent Reliability Index) + Circuit Breaker
+// ============================================================
+
+interface ARIState {
+  provider: string;
+  score: number;        // 0-100, starts at 100
+  errorCount: number;
+  successCount: number;
+  lastError: number;    // timestamp
+  circuitState: 'closed' | 'open' | 'half-open';
+  circuitOpenedAt: number;
+}
+
+// In-memory ARI state per provider
+const _ariStore: Map<string, ARIState> = new Map();
+
+const ARI_CIRCUIT_OPEN_DURATION_MS = 60000; // 60s cooldown before half-open
+const ARI_ALPHA = 0.3; // EMA weight — recent events weight more
+
+function _getARIState(provider: string): ARIState {
+  if (!_ariStore.has(provider)) {
+    _ariStore.set(provider, {
+      provider,
+      score: 100,
+      errorCount: 0,
+      successCount: 0,
+      lastError: 0,
+      circuitState: 'closed',
+      circuitOpenedAt: 0,
+    });
+  }
+  return _ariStore.get(provider)!;
+}
+
+function updateARI(provider: string, success: boolean): ARIState {
+  const state = _getARIState(provider);
+  const delta = success ? +5 : -15;
+  // EMA decay: newScore blends current score toward (score + delta)
+  const rawNew = state.score * (1 - ARI_ALPHA) + (state.score + delta) * ARI_ALPHA;
+  state.score = Math.max(0, Math.min(100, Math.round(rawNew * 100) / 100));
+
+  if (success) {
+    state.successCount++;
+  } else {
+    state.errorCount++;
+    state.lastError = Date.now();
+  }
+
+  // Circuit breaker state transitions
+  if (state.score < 30 && state.circuitState === 'closed') {
+    state.circuitState = 'open';
+    state.circuitOpenedAt = Date.now();
+  }
+  if (state.circuitState === 'open' && Date.now() - state.circuitOpenedAt > ARI_CIRCUIT_OPEN_DURATION_MS) {
+    state.circuitState = 'half-open';
+  }
+  if (state.circuitState === 'half-open' && success) {
+    state.circuitState = 'closed';
+    // Recovery boost: bump score slightly on successful half-open probe
+    state.score = Math.min(100, state.score + 10);
+  }
+  if (state.circuitState === 'half-open' && !success) {
+    // Failed probe — re-open circuit
+    state.circuitState = 'open';
+    state.circuitOpenedAt = Date.now();
+  }
+
+  return { ...state };
+}
+
+/** Check if a provider's circuit breaker allows requests */
+function isProviderAvailable(provider: string): boolean {
+  const state = _getARIState(provider);
+  // Check for half-open transition on read
+  if (state.circuitState === 'open' && Date.now() - state.circuitOpenedAt > ARI_CIRCUIT_OPEN_DURATION_MS) {
+    state.circuitState = 'half-open';
+  }
+  return state.circuitState !== 'open';
+}
+
+/** Get the best provider from a key list, sorted by ARI score (highest first), filtering out open circuits */
+function getBestProvider(
+  allKeys: Array<{ provider: string; key: string; model: string; baseUrl?: string }>,
+): Array<{ provider: string; key: string; model: string; baseUrl?: string }> {
+  // Separate available vs unavailable
+  const available = allKeys.filter(k => isProviderAvailable(k.provider));
+  const unavailable = allKeys.filter(k => !isProviderAvailable(k.provider));
+
+  // Sort available by ARI score descending
+  available.sort((a, b) => {
+    const sa = _getARIState(a.provider).score;
+    const sb = _getARIState(b.provider).score;
+    return sb - sa;
+  });
+
+  // Unavailable go to the end as fallback (in case all are open)
+  return [...available, ...unavailable];
+}
+
+/** Get diagnostic ARI report for all tracked providers */
+function getARIReport(): Array<ARIState & { available: boolean }> {
+  const report: Array<ARIState & { available: boolean }> = [];
+  for (const [, state] of _ariStore) {
+    // Refresh half-open check
+    if (state.circuitState === 'open' && Date.now() - state.circuitOpenedAt > ARI_CIRCUIT_OPEN_DURATION_MS) {
+      state.circuitState = 'half-open';
+    }
+    report.push({ ...state, available: state.circuitState !== 'open' });
+  }
+  return report.sort((a, b) => b.score - a.score);
+}
+
+// Export ARI functions for external use
+export { updateARI, getARIReport, isProviderAvailable, getBestProvider };
+export type { ARIState };
+
+// IDENTITY_SEAL: PART-2.5 | role=ari-circuit-breaker | inputs=provider,success | outputs=ARIState
+
+// ============================================================
 // PART 3 — streamChat (핵심 API — @/lib/ai-providers 대체)
 // ============================================================
 
@@ -154,24 +273,38 @@ export async function streamChat(opts: StreamChatOptions): Promise<ChatResult> {
     throw new Error('AI 미설정 — cs config set-key <provider> <key>');
   }
 
+  // ARI-based dynamic routing: sort by reliability score, skip open circuits
+  const sortedKeys = getBestProvider(allKeys);
+
   const errors: string[] = [];
-  for (let i = 0; i < allKeys.length; i++) {
-    const keyInfo = allKeys[i];
+  for (let i = 0; i < sortedKeys.length; i++) {
+    const keyInfo = sortedKeys[i];
+
+    // Circuit breaker check: skip providers with open circuit
+    if (!isProviderAvailable(keyInfo.provider)) {
+      errors.push(`${keyInfo.provider}: circuit OPEN (ARI=${Math.round(_getARIState(keyInfo.provider).score)})`);
+      continue;
+    }
+
     try {
       const result = await _streamChatWithKey(opts, keyInfo.provider, keyInfo.key, keyInfo.model, keyInfo.baseUrl);
       // 성공 시 즉시 반환
       if (!result.content.startsWith('[AI Error')) {
-        if (i > 0) console.log(`  🔄 폴백 성공: ${keyInfo.provider}/${keyInfo.model} (${i + 1}번째 키)`);
+        updateARI(keyInfo.provider, true);
+        if (i > 0) console.log(`  🔄 폴백 성공: ${keyInfo.provider}/${keyInfo.model} (ARI=${Math.round(_getARIState(keyInfo.provider).score)})`);
         return result;
       }
+      // AI returned error content — treat as failure
+      updateARI(keyInfo.provider, false);
       errors.push(`${keyInfo.provider}: ${result.content.slice(0, 80)}`);
     } catch (e) {
+      updateARI(keyInfo.provider, false);
       errors.push(`${keyInfo.provider}: ${(e as Error).message.slice(0, 80)}`);
     }
   }
 
   // 모든 키 실패
-  const msg = `[AI 전체 실패] ${allKeys.length}개 키 시도:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}`;
+  const msg = `[AI 전체 실패] ${sortedKeys.length}개 키 시도:\n${errors.map((e, i) => `  ${i + 1}. ${e}`).join('\n')}`;
   opts.onChunk?.(msg);
   return { content: msg, model: 'none', durationMs: 0 };
 }
@@ -288,7 +421,7 @@ async function _streamChatWithKey(
   }
 }
 
-// IDENTITY_SEAL: PART-3 | role=stream-chat-realtime | inputs=StreamChatOptions | outputs=ChatResult
+// IDENTITY_SEAL: PART-3 | role=stream-chat-realtime-ari | inputs=StreamChatOptions | outputs=ChatResult
 
 // ============================================================
 // PART 4 — Convenience: Quick Ask
@@ -307,7 +440,7 @@ export async function quickAsk(
   return result.content;
 }
 
-// IDENTITY_SEAL: PART-4 | role=quick-ask | inputs=prompt | outputs=string
+// IDENTITY_SEAL: PART-4 | role=quick-ask-ari | inputs=prompt | outputs=string
 
 // ============================================================
 // PART 5 — getAIConfig re-export (호환성)

@@ -133,3 +133,78 @@ export function applySuppression(
 }
 
 // IDENTITY_SEAL: PART-3 | role=suppression-filter | inputs=findings,suppressions | outputs=kept,suppressed
+
+// ============================================================
+// PART 4 — Scope-Aware Suppression
+// ============================================================
+
+/**
+ * PolicyGraph를 사용한 스코프 인식 억제.
+ * 모듈 수준 억제는 워크스페이스/글로벌 오버라이드가 없을 때만 적용.
+ * policyGraph가 없으면 기존 applySuppression 폴백.
+ */
+export function applyScopedSuppression(
+  findings: Array<{ ruleId?: string; line: number; message: string; filePath?: string; [key: string]: unknown }>,
+  suppressions: Suppression[],
+  policyGraph?: any,
+  filePath?: string,
+): { kept: typeof findings; suppressed: number; policyOverridden: number } {
+  // PolicyGraph가 없으면 기존 로직 폴백
+  if (!policyGraph || !filePath) {
+    const result = applySuppression(findings, suppressions);
+    return { ...result, policyOverridden: 0 };
+  }
+
+  const fileRules = new Set(
+    suppressions.filter(s => s.type === 'file').map(s => s.ruleId),
+  );
+  const nextLineMap = new Map(
+    suppressions.filter(s => s.type === 'next-line').map(s => [`${s.line}:${s.ruleId}`, true]),
+  );
+
+  const kept: typeof findings = [];
+  let suppressed = 0;
+  let policyOverridden = 0;
+
+  for (const f of findings) {
+    const ruleId = f.ruleId ?? '';
+
+    // Step 1: PolicyGraph에서 해당 rule의 유효 정책 조회
+    const resolvedPolicy = policyGraph.resolve(ruleId, filePath);
+
+    // Step 2: 상위 스코프(global/workspace)에서 enforce → inline suppression 무시
+    if (resolvedPolicy && resolvedPolicy.action === 'enforce' &&
+        (resolvedPolicy.scope === 'global' || resolvedPolicy.scope === 'workspace')) {
+      // 상위 스코프가 enforce하므로 이 finding은 억제 불가
+      kept.push(f);
+      // 인라인 억제가 시도됐지만 정책에 의해 오버라이드됨
+      if (fileRules.has(ruleId) || fileRules.has('*') ||
+          nextLineMap.has(`${f.line}:${ruleId}`) || nextLineMap.has(`${f.line}:*`)) {
+        policyOverridden++;
+      }
+      continue;
+    }
+
+    // Step 3: 상위 스코프에서 suppress → 무조건 억제
+    if (resolvedPolicy && resolvedPolicy.action === 'suppress') {
+      suppressed++;
+      continue;
+    }
+
+    // Step 4: 기존 인라인 억제 로직 (module-level)
+    if (fileRules.has(ruleId) || fileRules.has('*')) {
+      suppressed++;
+      continue;
+    }
+    if (nextLineMap.has(`${f.line}:${ruleId}`) || nextLineMap.has(`${f.line}:*`)) {
+      suppressed++;
+      continue;
+    }
+
+    kept.push(f);
+  }
+
+  return { kept, suppressed, policyOverridden };
+}
+
+// IDENTITY_SEAL: PART-4 | role=scope-aware-suppression | inputs=findings,suppressions,policyGraph,filePath | outputs=kept,suppressed,policyOverridden

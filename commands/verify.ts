@@ -164,6 +164,27 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
     return;
   }
   if (!opts.diff) log(`  ${icons.folder} ${files.length}개 파일 발견`);
+
+  // ── Policy Graph 로드 (.csquill-policy.json) ──
+  let policyGraph: any = null;
+  let policyConflicts: any[] = [];
+  const policyRoot = path === '.' ? process.cwd() : require('path').resolve(path);
+  try {
+    const { loadPolicyFile, detectConflicts } = require('../core/scope-policy');
+    policyGraph = loadPolicyFile(policyRoot);
+    const nodeCount = policyGraph.getNodeCount();
+    if (nodeCount.global > 0 || nodeCount.workspaces > 0 || nodeCount.modules > 0) {
+      const allRules = policyGraph.getAllRules();
+      policyConflicts = detectConflicts(allRules);
+      if (!isJson) {
+        log(`  📋 Policy: ${allRules.length}개 규칙 (G:${nodeCount.global} W:${nodeCount.workspaces} M:${nodeCount.modules})`);
+        if (policyConflicts.length > 0) {
+          log(`  ⚠️  Policy 충돌: ${policyConflicts.length}건 감지 (상위 스코프 우선)`);
+        }
+      }
+    }
+  } catch { /* scope-policy 모듈 없으면 skip */ }
+
   const useParallel = opts.parallel && files.length > 3;
   if (useParallel) log(`  ${icons.rocket} 워커풀 병렬 모드 (${Math.min(files.length, 4)} workers)`);
   log('');
@@ -466,11 +487,12 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   // ── Baseline + Suppression 필터 ──
   let baselineSuppressed = 0;
   let inlineSuppressed = 0;
+  let policyOverriddenTotal = 0;
   const root = path === '.' ? process.cwd() : require('path').resolve(path);
 
   try {
     const { loadBaseline, filterByBaseline, initBaseline } = require('../core/baseline');
-    const { parseSuppressions, applySuppression, loadIgnorePatterns, isIgnored } = require('../core/suppression');
+    const { parseSuppressions, applySuppression, applyScopedSuppression, loadIgnorePatterns, isIgnored } = require('../core/suppression');
 
     // --init-baseline: 현재 결과를 baseline으로 저장
     if (opts.initBaseline) {
@@ -495,13 +517,19 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
       }
     }
 
-    // Inline suppression: csquill-disable 주석
+    // Inline suppression: csquill-disable 주석 (scope-aware)
     for (const file of files) {
       const suppressions = parseSuppressions(file.content);
       if (suppressions.length > 0) {
         const fileFindings = allDetails.filter(d => true); // 현재 file 단위 분리 없으므로 전체에서 적용
-        const result = applySuppression(fileFindings, suppressions);
-        inlineSuppressed += result.suppressed;
+        if (policyGraph && typeof applyScopedSuppression === 'function') {
+          const result = applyScopedSuppression(fileFindings, suppressions, policyGraph, file.relativePath);
+          inlineSuppressed += result.suppressed;
+          policyOverriddenTotal += result.policyOverridden;
+        } else {
+          const result = applySuppression(fileFindings, suppressions);
+          inlineSuppressed += result.suppressed;
+        }
       }
     }
   } catch { /* baseline/suppression 모듈 없으면 skip */ }
@@ -586,7 +614,13 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
         totalTeams: teams.length,
       },
       goodPatternReport,
+      policy: {
+        loaded: !!policyGraph,
+        conflicts: policyConflicts.length,
+        overridden: policyOverriddenTotal,
+      },
       duration, aiVerified, falsePositivesRemoved,
+      ari: (() => { try { const { getARIReport } = require('../core/ai-bridge'); return getARIReport(); } catch { return []; } })(),
     }, null, 2));
     return;
   }
@@ -645,11 +679,26 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
   if (aiVerified) {
     console.log(`  🤖 AI 판정 — ${falsePositivesRemoved}건 추가 제거`);
   }
+  // ARI (Agent Reliability Index) report
+  try {
+    const { getARIReport } = require('../core/ai-bridge');
+    const ariReport = getARIReport();
+    if (ariReport.length > 0) {
+      console.log('  📡 ARI (Agent Reliability Index):');
+      for (const ari of ariReport) {
+        const circuitIcon = ari.circuitState === 'closed' ? '🟢' : ari.circuitState === 'half-open' ? '🟡' : '🔴';
+        console.log(`     ${circuitIcon} ${ari.provider}: score=${Math.round(ari.score)} circuit=${ari.circuitState} (ok=${ari.successCount} err=${ari.errorCount})`);
+      }
+    }
+  } catch { /* ARI not available */ }
   if (baselineSuppressed > 0) {
     console.log(`  📌 Baseline — ${baselineSuppressed}건 동결`);
   }
   if (inlineSuppressed > 0) {
     console.log(`  🔇 Suppression — ${inlineSuppressed}건 억제`);
+  }
+  if (policyOverriddenTotal > 0) {
+    console.log(`  📋 Policy Override — ${policyOverriddenTotal}건 상위 스코프 강제 적용`);
   }
 
   // Improvement hints for lowest scoring teams

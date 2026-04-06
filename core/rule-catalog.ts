@@ -19,6 +19,8 @@ export type Engine = 'regex' | 'ast' | 'symbol' | 'cfg' | 'metric';
 export type Source = 'ai' | 'human' | 'both';
 export type Action = 'hard-fail' | 'review' | 'hint';
 
+export type PolicyScope = 'module' | 'workspace' | 'global';
+
 export interface RuleMeta {
   id: string;
   title: string;
@@ -28,6 +30,7 @@ export interface RuleMeta {
   engine: Engine;
   source: Source;
   defaultAction: Action;
+  scope: PolicyScope;
   cwe?: string;
   owasp?: string;
 }
@@ -41,7 +44,7 @@ function r(
   severity: Severity, confidence: Confidence, engine: Engine,
   source: Source, action: Action, cwe?: string, owasp?: string,
 ): RuleMeta {
-  return { id, title, category, severity, confidence, engine, source, defaultAction: action, cwe, owasp };
+  return { id, title, category, severity, confidence, engine, source, defaultAction: action, scope: 'global', cwe, owasp };
 }
 
 export const RULE_CATALOG: RuleMeta[] = [
