@@ -126,7 +126,7 @@ export async function runEnhancedPipeline(
 
     for (const f of astResult.findings) {
       findings.push({
-        engine: (f as unknown).engine ?? 'ast',
+        engine: (f as any).engine ?? 'ast',
         line: f.line,
         message: f.message,
         severity: mapSeverity(f.severity),
@@ -452,6 +452,42 @@ export async function runASTHollowScan(code: string, fileName: string): Promise<
         }
       }
     });
+
+    // --- [Phase 4-B] Registered Plug-in Detectors (414 Rule Connectors) ---
+    const { loadAllDetectors } = require('./detectors');
+    const { getRule } = require('./rule-catalog');
+    
+    const registry = loadAllDetectors();
+    for (const detector of registry.getDetectors()) {
+      const ruleMeta = getRule(detector.ruleId) || {
+        severity: 'warning',
+        category: 'generation',
+        confidence: 'high'
+      };
+      
+      const pFindings = detector.detect(sourceFile);
+      for (const pf of pFindings) {
+        // Find best severity mapping matching ASTFinding interface
+        let mappedSev: 'critical'|'error'|'warning'|'info' = 'warning';
+        if (ruleMeta.severity === 'critical') mappedSev = 'critical';
+        else if (ruleMeta.severity === 'high') mappedSev = 'error';
+        else if (ruleMeta.severity === 'info') mappedSev = 'info';
+
+        // Find confidence math
+        let mappedConf = 0.8;
+        if (ruleMeta.confidence === 'high') mappedConf = 0.95;
+        else if (ruleMeta.confidence === 'low') mappedConf = 0.6;
+
+        findings.push({
+          engine: 'detector-plugin',
+          line: pf.line,
+          message: `[${detector.ruleId}] ${pf.message}`,
+          severity: mappedSev,
+          team: mapFindingToTeam({ message: pf.message, severity: mappedSev }),
+          confidence: mappedConf,
+        });
+      }
+    }
 
   } catch { /* ts-morph not available */ }
 
