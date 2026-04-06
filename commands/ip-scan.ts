@@ -168,8 +168,8 @@ function scanDependencyLicenses(rootPath: string): DepLicense[] {
           results.push({
             name,
             version: data.version ?? '?',
-            license: matched?.license ?? licenseStr || 'Unknown',
-            spdxId: matched?.spdxId ?? licenseStr || 'NOASSERTION',
+            license: matched?.license ?? (licenseStr || 'Unknown'),
+            spdxId: matched?.spdxId ?? (licenseStr || 'NOASSERTION'),
             copyleft: matched?.copyleft ?? false,
             riskTier: matched?.riskTier ?? 'permissive',
             isDirect: directDeps.has(name),
@@ -193,8 +193,8 @@ function scanDependencyLicenses(rootPath: string): DepLicense[] {
             results.push({
               name,
               version: d.version ?? '?',
-              license: matched?.license ?? licenseStr || 'Unknown',
-              spdxId: matched?.spdxId ?? licenseStr || 'NOASSERTION',
+              license: matched?.license ?? (licenseStr || 'Unknown'),
+              spdxId: matched?.spdxId ?? (licenseStr || 'NOASSERTION'),
               copyleft: matched?.copyleft ?? false,
               riskTier: matched?.riskTier ?? 'permissive',
               isDirect: directDeps.has(name),
@@ -278,8 +278,8 @@ function readDepLicenseInfo(depPath: string, name: string, isDirect: boolean): D
     return {
       name,
       version: pkg.version ?? '?',
-      license: matched?.license ?? licenseStr || 'Unknown',
-      spdxId: matched?.spdxId ?? licenseStr || 'NOASSERTION',
+      license: matched?.license ?? (licenseStr || 'Unknown'),
+      spdxId: matched?.spdxId ?? (licenseStr || 'NOASSERTION'),
       copyleft: matched?.copyleft ?? /GPL|AGPL|LGPL|MPL/i.test(licenseStr),
       riskTier: matched?.riskTier ?? 'permissive',
       isDirect,

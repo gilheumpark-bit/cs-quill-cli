@@ -433,7 +433,7 @@ const LANGUAGE_RULES: Record<string, LanguageRule[]> = {
   ],
   typescript: [
     { id: 'ts-any-cast', language: 'typescript', pattern: /as\s+any\b/g, message: 'Type assertion to any — loses type safety', severity: 'warning', category: 'type-safety' },
-    { id: 'ts-non-null', language: 'typescript', pattern: /\w+!/\./g, message: 'Non-null assertion (!) — prefer optional chaining', severity: 'info', category: 'safety' },
+    { id: 'ts-non-null', language: 'typescript', pattern: /\w+!\./g, message: 'Non-null assertion (!) — prefer optional chaining', severity: 'info', category: 'safety' },
     { id: 'ts-enum', language: 'typescript', pattern: /\benum\s+\w+/g, message: 'enum — consider const enum or union type for tree-shaking', severity: 'info', category: 'performance' },
   ],
   javascript: [
