@@ -10,14 +10,38 @@ export const res004Detector: RuleDetector = {
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for AbortController 없이 fetch
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'AbortController 없이 fetch 위반' });
-      // }
-    });
-    */
+    const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+    for (const call of calls) {
+       const expr = call.getExpression();
+       let name = '';
+       if (expr.isKind(SyntaxKind.Identifier)) {
+          name = expr.getText();
+       } else if (expr.isKind(SyntaxKind.PropertyAccessExpression)) {
+          name = expr.getName();
+       }
+
+       if (name === 'fetch') {
+          const args = call.getArguments();
+          let hasSignal = false;
+          if (args.length >= 2) {
+             const options = args[1];
+             if (options.isKind(SyntaxKind.ObjectLiteralExpression)) {
+                const props = options.getProperties();
+                for (const prop of props) {
+                   if (prop.isKind(SyntaxKind.PropertyAssignment) || prop.isKind(SyntaxKind.ShorthandPropertyAssignment)) {
+                      if (prop.getName() === 'signal') {
+                         hasSignal = true;
+                         break;
+                      }
+                   }
+                }
+             }
+          }
+          if (!hasSignal) {
+             findings.push({ line: call.getStartLineNumber(), message: 'AbortController 없이 fetch 위반' });
+          }
+       }
+    }
 
     return findings;
   }

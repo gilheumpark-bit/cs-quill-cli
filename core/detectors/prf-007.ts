@@ -10,15 +10,27 @@ export const prf007Detector: RuleDetector = {
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for .find() 반복 → Map 최적화
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '.find() 반복 → Map 최적화 위반' });
-      // }
-    });
-    */
+    const loops = [
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForInStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForOfStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.WhileStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.DoStatement)
+    ];
 
-    return findings;
+    for (const loop of loops) {
+      const calls = loop.getDescendantsOfKind(SyntaxKind.CallExpression);
+      for (const call of calls) {
+        const expr = call.getExpression();
+        if (expr.isKind(SyntaxKind.PropertyAccessExpression)) {
+          const propName = expr.getName();
+          if (propName === 'find') {
+             findings.push({ line: call.getStartLineNumber(), message: '.find() 반복 → Map 최적화 위반' });
+          }
+        }
+      }
+    }
+
+    return Array.from(new Map(findings.map(f => [`${f.line}:${f.message}`, f])).values());
   }
 };

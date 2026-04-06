@@ -10,14 +10,31 @@ export const res002Detector: RuleDetector = {
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for DB connection 반환 누락
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'DB connection 반환 누락 위반' });
-      // }
-    });
-    */
+    // Heuristic: pool.connect() or getConnection() without release() or close()
+    const calls = sourceFile.getDescendantsOfKind(SyntaxKind.CallExpression);
+
+    let hasConnect = false;
+    let connectLines: number[] = [];
+    let hasRelease = false;
+
+    for (const call of calls) {
+       const expr = call.getExpression();
+       if (expr.isKind(SyntaxKind.PropertyAccessExpression)) {
+          const propName = expr.getName();
+          if (propName === 'getConnection' || (expr.getExpression().getText() === 'pool' && propName === 'connect')) {
+             hasConnect = true;
+             connectLines.push(call.getStartLineNumber());
+          } else if (propName === 'release' || propName === 'end' || propName === 'close') {
+             hasRelease = true;
+          }
+       }
+    }
+
+    if (hasConnect && !hasRelease) {
+       for (const line of connectLines) {
+           findings.push({ line, message: 'DB connection 반환 누락 위반' });
+       }
+    }
 
     return findings;
   }

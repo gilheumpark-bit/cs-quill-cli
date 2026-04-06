@@ -10,15 +10,21 @@ export const prf004Detector: RuleDetector = {
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for await in loop → Promise.all
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'await in loop → Promise.all 위반' });
-      // }
-    });
-    */
+    const loops = [
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForInStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.ForOfStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.WhileStatement),
+      ...sourceFile.getDescendantsOfKind(SyntaxKind.DoStatement)
+    ];
 
-    return findings;
+    for (const loop of loops) {
+      const awaits = loop.getDescendantsOfKind(SyntaxKind.AwaitExpression);
+      for (const awaitExpr of awaits) {
+         findings.push({ line: awaitExpr.getStartLineNumber(), message: 'await in loop → Promise.all 위반' });
+      }
+    }
+
+    return Array.from(new Map(findings.map(f => [`${f.line}:${f.message}`, f])).values());
   }
 };
