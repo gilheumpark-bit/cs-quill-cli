@@ -305,6 +305,85 @@ export function analyzeWithProgram(
       }
     }
 
+    // ── 추가 탐지 규칙 (카탈로그 매핑) ──
+
+    // TYP-001: any 타입
+    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) && node.typeName.text === 'any') {
+      addFinding({ ruleId: 'TYP-001', line: lineOf(node), message: 'any 타입 사용', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'TypeReference === any' }] });
+    }
+
+    // TYP-004: ! non-null assertion
+    if (ts.isNonNullExpression(node)) {
+      addFinding({ ruleId: 'TYP-004', line: lineOf(node), message: '! non-null assertion', severity: 'warning', confidence: 'medium', evidence: [{ engine: 'typescript-ast', detail: 'NonNullExpression' }] });
+    }
+
+    // API-006: console.log (프로덕션)
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const obj = node.expression.expression;
+      const prop = node.expression.name;
+      if (ts.isIdentifier(obj) && obj.text === 'console' && (prop.text === 'log' || prop.text === 'debug')) {
+        addFinding({ ruleId: 'API-006', line: lineOf(node), message: `console.${prop.text}() 발견`, severity: 'info', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'console.log/debug' }] });
+      }
+    }
+
+    // API-009: document.write
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+      const obj = node.expression.expression;
+      const prop = node.expression.name;
+      if (ts.isIdentifier(obj) && obj.text === 'document' && prop.text === 'write') {
+        addFinding({ ruleId: 'API-009', line: lineOf(node), message: 'document.write() — XSS 위험', severity: 'error', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'document.write' }] });
+      }
+    }
+
+    // ASY-001: async 함수 내 await 누락 체크 (async 함수인데 await 없음)
+    if ((ts.isFunctionDeclaration(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node)) &&
+        node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword)) {
+      let hasAwait = false;
+      ts.forEachChild(node, function checkAwait(child) {
+        if (ts.isAwaitExpression(child)) hasAwait = true;
+        if (!hasAwait) ts.forEachChild(child, checkAwait);
+      });
+      if (!hasAwait) {
+        addFinding({ ruleId: 'ASY-008', line: lineOf(node), message: 'await 없는 async 함수', severity: 'info', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'async without await' }] });
+      }
+    }
+
+    // RTE-016: for...in on Array
+    if (ts.isForInStatement(node)) {
+      addFinding({ ruleId: 'RTE-016', line: lineOf(node), message: 'for...in 사용 — Array에서는 for...of 권장', severity: 'warning', confidence: 'medium', evidence: [{ engine: 'typescript-ast', detail: 'ForInStatement' }] });
+    }
+
+    // RTE-018: switch default 없음
+    if (ts.isSwitchStatement(node)) {
+      const hasDefault = node.caseBlock.clauses.some(c => ts.isDefaultClause(c));
+      if (!hasDefault) {
+        addFinding({ ruleId: 'RTE-018', line: lineOf(node), message: 'switch에 default 케이스 없음', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'SwitchStatement without default' }] });
+      }
+    }
+
+    // ERR-005: 문자열 throw
+    if (ts.isThrowStatement(node) && node.expression && ts.isStringLiteral(node.expression)) {
+      addFinding({ ruleId: 'ERR-005', line: lineOf(node), message: '문자열 throw — Error 클래스 사용 권장', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'throw "string"' }] });
+    }
+
+    // VAR-002: var 사용
+    if (ts.isVariableDeclarationList(node) && (node.flags & ts.NodeFlags.Let) === 0 && (node.flags & ts.NodeFlags.Const) === 0) {
+      // var 키워드 (Let/Const 플래그 없음)
+      if (node.parent && ts.isVariableStatement(node.parent)) {
+        addFinding({ ruleId: 'VAR-002', line: lineOf(node), message: 'var 사용 — let/const 권장', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'VariableDeclarationList without Let/Const flag' }] });
+      }
+    }
+
+    // LOG-008: 삼항 중첩 3단+
+    if (ts.isConditionalExpression(node) && ts.isConditionalExpression(node.whenTrue)) {
+      if (ts.isConditionalExpression((node.whenTrue as any).whenTrue)) {
+        addFinding({ ruleId: 'LOG-008', line: lineOf(node), message: '삼항 연산자 3단 중첩', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'triple nested ConditionalExpression' }] });
+      }
+    }
+
+    // STL-010: TODO/FIXME (주석에서)
+    // AST에서 주석은 별도 처리 필요 — trivia로 접근
+
     ts.forEachChild(node, (child) => visit(child, depth + 1));
   }
 

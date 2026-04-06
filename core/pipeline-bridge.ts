@@ -202,17 +202,17 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
   const findings: PipelineResult['teams'][0]['findings'] = [];
   const lines = code.split('\n');
 
-  const patterns: Array<{ regex: RegExp; msg: string; severity: 'error' | 'warning' }> = [
-    { regex: /console\.(log|debug)\(/, msg: 'console.log 발견', severity: 'warning' },
-    { regex: /TODO|FIXME|HACK|XXX/, msg: 'TODO/FIXME 주석', severity: 'info' as unknown },
-    { regex: /eval\s*\(/, msg: 'eval() 사용 (보안 위험)', severity: 'error' },
-    { regex: /document\.(write|writeln)\(/, msg: 'document.write (XSS)', severity: 'error' },
-    { regex: /innerHTML\s*=/, msg: 'innerHTML 직접 할당 (XSS)', severity: 'warning' },
-    { regex: /any[;\s,\)]/, msg: 'TypeScript any 타입', severity: 'warning' },
-    { regex: /\/\/\s*@ts-ignore/, msg: '@ts-ignore 사용', severity: 'warning' },
-    { regex: /password\s*=\s*['"`]/, msg: '하드코딩된 패스워드', severity: 'error' },
-    { regex: /\.then\(.*\.catch\(\s*\)/, msg: '빈 catch (에러 무시)', severity: 'warning' },
-    { regex: /new\s+Date\(\)\.getTime/, msg: 'Date.now() 대신 new Date().getTime()', severity: 'info' as unknown },
+  const patterns: Array<{ regex: RegExp; msg: string; severity: 'error' | 'warning'; ruleId: string }> = [
+    { regex: /console\.(log|debug)\(/, msg: 'console.log 발견', severity: 'info' as any, ruleId: 'API-006' },
+    { regex: /TODO|FIXME|HACK|XXX/, msg: 'TODO/FIXME 주석', severity: 'info' as any, ruleId: 'STL-010' },
+    { regex: /eval\s*\(/, msg: 'eval() 사용 (보안 위험)', severity: 'error', ruleId: 'SEC-006' },
+    { regex: /document\.(write|writeln)\(/, msg: 'document.write (XSS)', severity: 'error', ruleId: 'API-009' },
+    { regex: /innerHTML\s*=/, msg: 'innerHTML 직접 할당 (XSS)', severity: 'warning', ruleId: 'API-010' },
+    { regex: /any[;\s,\)]/, msg: 'TypeScript any 타입', severity: 'warning', ruleId: 'TYP-001' },
+    { regex: /\/\/\s*@ts-ignore/, msg: '@ts-ignore 사용', severity: 'warning', ruleId: 'TYP-003' },
+    { regex: /password\s*=\s*['"`]/, msg: '하드코딩된 패스워드', severity: 'error', ruleId: 'SEC-009' },
+    { regex: /\.then\(.*\.catch\(\s*\)/, msg: '빈 catch (에러 무시)', severity: 'warning', ruleId: 'ERR-001' },
+    { regex: /new\s+Date\(\)\.getTime/, msg: 'Date.now() 대신 new Date().getTime()', severity: 'info' as any, ruleId: 'LOG-019' },
   ];
 
   const ruleLinePat = /regex\s*:|\/.*\/[gimsuy]*\s*,|severity\s*:/;
@@ -225,7 +225,7 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
       const cnt = patternCounts.get(p.msg) ?? 0;
       if (cnt >= 3) continue;
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity });
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
         patternCounts.set(p.msg, cnt + 1);
       }
     }
@@ -392,7 +392,7 @@ function runBugPatternCheck(code: string, _language: string): PipelineResult['te
   for (let i = 0; i < lines.length; i++) {
     for (const p of bugPatterns) {
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity });
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
       }
     }
   }
@@ -422,7 +422,7 @@ function runSecurityPatternCheck(code: string, _language: string): PipelineResul
     if (ruleDefPattern.test(lines[i])) continue;
     for (const p of secPatterns) {
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity });
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
       }
     }
   }
