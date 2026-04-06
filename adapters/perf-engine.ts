@@ -9,7 +9,10 @@
 // ============================================================
 
 export async function runAutocannon(url: string, opts?: { connections?: number; duration?: number }) {
-  const autocannon = (require('autocannon')).default;
+  let autocannon: any;
+  try { autocannon = (require('autocannon')).default; } catch {
+    throw new Error('MISSING: autocannon is not installed. Run: npm i autocannon');
+  }
 
   return new Promise<{
     rps: number; latencyAvg: number; latencyP50: number; latencyP95: number; latencyP99: number;
@@ -45,7 +48,10 @@ export async function runAutocannon(url: string, opts?: { connections?: number; 
 // ============================================================
 
 export async function runTinybench(benchmarks: Array<{ name: string; fn: () => void | Promise<void> }>) {
-  const { Bench } = require('tinybench');
+  let Bench: any;
+  try { ({ Bench } = require('tinybench')); } catch {
+    throw new Error('MISSING: tinybench is not installed. Run: npm i tinybench');
+  }
 
   const bench = new Bench({ time: 1000 });
 
@@ -72,6 +78,10 @@ export async function runTinybench(benchmarks: Array<{ name: string; fn: () => v
 // ============================================================
 
 export async function runC8(command: string, rootPath: string) {
+  // Verify c8 is available before attempting to use it
+  try { require.resolve('c8'); } catch {
+    throw new Error('MISSING: c8 is not installed. Run: npm i c8');
+  }
   const { execSync } = require('child_process');
   try {
     const _output = execSync(`npx c8 --reporter=json-summary ${command} 2>/dev/null`, {
@@ -189,40 +199,102 @@ export async function runFullPerfAnalysis(rootPath: string) {
 
   // c8 coverage
   try {
-    const coverage = await runC8('npm test -- --no-coverage 2>/dev/null', rootPath);
-    const score = Math.round((coverage.lines + coverage.branches + coverage.functions) / 3);
-    results.push({ engine: 'c8', score, detail: `lines ${coverage.lines}% branches ${coverage.branches}%` });
+    let c8Available = false;
+    try { require.resolve('c8'); c8Available = true; } catch {}
+    if (!c8Available) {
+      results.push({ engine: 'c8', score: 0, detail: 'MISSING: install c8 — npm i c8. No fake fallback.' });
+    } else {
+      const coverage = await runC8('npm test -- --no-coverage 2>/dev/null', rootPath);
+      const score = Math.round((coverage.lines + coverage.branches + coverage.functions) / 3);
+      results.push({ engine: 'c8', score, detail: `lines ${coverage.lines}% branches ${coverage.branches}%` });
+    }
   } catch {
-    results.push({ engine: 'c8', score: 0, detail: 'no tests' });
+    results.push({ engine: 'c8', score: 0, detail: 'coverage run failed' });
   }
 
-  // Tinybench — micro-benchmark critical paths if entry file exists
+  // Tinybench — benchmark REAL bottlenecks (not fake JSON.parse)
   try {
-    const { existsSync, readFileSync } = require('fs');
-    const { join, resolve } = require('path');
-    const pkgPath = join(rootPath, 'package.json');
-    if (existsSync(pkgPath)) {
-      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
-      const mainFile = pkg.main || pkg.module || 'index.js';
-      const mainPath = resolve(rootPath, mainFile);
+    // Fail fast with clear message if tinybench is not installed
+    let tinybenchAvailable = false;
+    try { require('tinybench'); tinybenchAvailable = true; } catch {}
+    if (!tinybenchAvailable) {
+      results.push({ engine: 'tinybench', score: 0, detail: 'MISSING: install tinybench — npm i tinybench. No fake fallback.' });
+    } else {
+      const { existsSync, readFileSync, readdirSync } = require('fs');
+      const { join, resolve } = require('path');
+      const { execSync } = require('child_process');
+      const pkgPath = join(rootPath, 'package.json');
+      const benchmarks: Array<{ name: string; fn: () => void | Promise<void> }> = [];
 
-      if (existsSync(mainPath)) {
-        // Benchmark require/import time of the main module
-        const benchmarks = [
-          {
-            name: `require(${mainFile})`,
+      if (existsSync(pkgPath)) {
+        const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+        const mainFile = pkg.main || pkg.module || 'index.js';
+        const mainPath = resolve(rootPath, mainFile);
+
+        // Benchmark 1: Module load time — measure actual require() of target file
+        if (existsSync(mainPath)) {
+          benchmarks.push({
+            name: `module-load(${mainFile})`,
             fn: () => {
               try {
                 delete require.cache[require.resolve(mainPath)];
                 require(mainPath);
               } catch { /* module may not be loadable outside its context */ }
             },
-          },
-          {
-            name: 'JSON.parse(package.json)',
-            fn: () => { JSON.parse(readFileSync(pkgPath, 'utf-8')); },
-          },
-        ];
+          });
+        }
+
+        // Benchmark 2: Cold start — measure CLI process spawn time
+        const binPath = pkg.bin ? resolve(rootPath, typeof pkg.bin === 'string' ? pkg.bin : Object.values(pkg.bin)[0] as string) : null;
+        if (binPath && existsSync(binPath)) {
+          benchmarks.push({
+            name: 'cold-start(cli-spawn)',
+            fn: () => {
+              try {
+                execSync(`node "${binPath}" --help`, { cwd: rootPath, timeout: 10000, stdio: 'pipe' });
+              } catch { /* cli may exit non-zero for --help */ }
+            },
+          });
+        }
+
+        // Benchmark 3: TypeScript AST parse time (using ts-morph if available)
+        let tsMorphAvailable = false;
+        try { require('ts-morph'); tsMorphAvailable = true; } catch {}
+        if (tsMorphAvailable) {
+          // Find a sample .ts file to parse
+          const sampleFiles = readdirSync(rootPath).filter((f: string) => f.endsWith('.ts') && !f.endsWith('.d.ts'));
+          const sampleFile = sampleFiles[0];
+          if (sampleFile) {
+            const samplePath = join(rootPath, sampleFile);
+            const sampleSource = readFileSync(samplePath, 'utf-8');
+            benchmarks.push({
+              name: `ast-parse(${sampleFile})`,
+              fn: () => {
+                const { Project } = require('ts-morph');
+                const project = new Project({ useInMemoryFileSystem: true });
+                project.createSourceFile('__bench__.ts', sampleSource);
+              },
+            });
+          }
+        }
+
+        // Benchmark 4: Pipeline throughput — single-file verification speed
+        const { runStaticPipeline } = require('../core/pipeline-bridge');
+        if (typeof runStaticPipeline === 'function') {
+          // Use a small sample from the project itself
+          const sampleForPipeline = existsSync(mainPath) ? readFileSync(mainPath, 'utf-8').slice(0, 2000) : 'const x = 1;';
+          benchmarks.push({
+            name: 'pipeline-throughput(single-file)',
+            fn: async () => {
+              await runStaticPipeline(sampleForPipeline, 'typescript');
+            },
+          });
+        }
+      }
+
+      if (benchmarks.length === 0) {
+        results.push({ engine: 'tinybench', score: 0, detail: 'no benchmarkable targets found in project' });
+      } else {
         const benchResult = await runTinybench(benchmarks);
         const avgOps = benchResult.reduce((s, r) => s + r.opsPerSec, 0) / benchResult.length;
         const score = avgOps > 10000 ? 100 : avgOps > 1000 ? 80 : avgOps > 100 ? 60 : 40;
@@ -231,26 +303,49 @@ export async function runFullPerfAnalysis(rootPath: string) {
       }
     }
   } catch {
-    results.push({ engine: 'tinybench', score: 0, detail: 'not available' });
+    results.push({ engine: 'tinybench', score: 0, detail: 'benchmark execution failed' });
   }
 
-  // Memory leak detection
+  // Memory measurement — track heap growth during ACTUAL pipeline execution
   try {
-    const memResult = await measureMemoryGrowth(async () => {
-      // Simulate typical app iteration: read pkg, parse, discard
-      const { readFileSync, existsSync } = require('fs');
-      const { join } = require('path');
-      const p = join(rootPath, 'package.json');
-      if (existsSync(p)) { JSON.parse(readFileSync(p, 'utf-8')); }
-    }, 50);
-    const score = memResult.leakConfidence === 'none' ? 100
-      : memResult.leakConfidence === 'low' ? 85
-      : memResult.leakConfidence === 'medium' ? 60 : 30;
-    results.push({
-      engine: 'memory-leak',
-      score,
-      detail: `growth ${memResult.growth}MB, rate ${memResult.growthRateMBPerIter}MB/iter, confidence ${memResult.leakConfidence}`,
-    });
+    const { readFileSync, existsSync, readdirSync } = require('fs');
+    const { join } = require('path');
+    const { runStaticPipeline } = require('../core/pipeline-bridge');
+
+    // Find a real source file to use as pipeline input
+    let sampleCode = 'const x = 1;\nexport default x;\n';
+    const tsFiles = readdirSync(rootPath).filter((f: string) => f.endsWith('.ts') && !f.endsWith('.d.ts'));
+    if (tsFiles.length > 0) {
+      const samplePath = join(rootPath, tsFiles[0]);
+      if (existsSync(samplePath)) {
+        sampleCode = readFileSync(samplePath, 'utf-8').slice(0, 3000);
+      }
+    }
+
+    if (typeof runStaticPipeline !== 'function') {
+      results.push({ engine: 'memory-leak', score: 50, detail: 'pipeline not available for memory measurement' });
+    } else {
+      // Measure heap before/after actual pipeline runs
+      if (globalThis.gc) globalThis.gc();
+      const memBefore = process.memoryUsage();
+
+      const memResult = await measureMemoryGrowth(async () => {
+        await runStaticPipeline(sampleCode, 'typescript');
+      }, 30);
+
+      if (globalThis.gc) globalThis.gc();
+      const memAfter = process.memoryUsage();
+      const pipelineCostMB = Math.round((memAfter.heapUsed - memBefore.heapUsed) / 1024 / 1024 * 100) / 100;
+
+      const score = memResult.leakConfidence === 'none' ? 100
+        : memResult.leakConfidence === 'low' ? 85
+        : memResult.leakConfidence === 'medium' ? 60 : 30;
+      results.push({
+        engine: 'memory-leak',
+        score,
+        detail: `pipeline memory cost ${pipelineCostMB}MB, growth ${memResult.growth}MB, rate ${memResult.growthRateMBPerIter}MB/iter, confidence ${memResult.leakConfidence}`,
+      });
+    }
   } catch {
     results.push({ engine: 'memory-leak', score: 50, detail: 'measurement failed' });
   }

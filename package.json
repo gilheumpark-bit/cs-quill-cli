@@ -52,13 +52,16 @@
   },
   "optionalDependencies": {
     "acorn": "^8.0.0",
+    "autocannon": "^7.0.0",
     "axe-core": "^4.0.0",
+    "c8": "^8.0.0",
     "eslint": "^9.0.0",
     "fast-check": "^3.0.0",
     "jscpd": "^4.0.0",
     "jsdom": "^25.0.0",
     "madge": "^8.0.0",
     "prettier": "^3.0.0",
+    "tinybench": "^2.0.0",
     "ts-morph": "^23.0.0",
     "typescript": "^5.0.0"
   },

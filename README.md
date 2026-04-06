@@ -12,8 +12,8 @@
 > *A hedgehog's quills protect it from threats. CS Quill's 56 engines protect your code from bugs, vulnerabilities, and tech debt.*
 
 [![CI](https://github.com/gilheumpark-bit/cs-quill-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/gilheumpark-bit/cs-quill-cli/actions)
-[![Tests](https://img.shields.io/badge/tests-274%20passed-brightgreen)](https://github.com/gilheumpark-bit/cs-quill-cli)
-[![Coverage](https://img.shields.io/badge/coverage-47%25-yellow)](https://github.com/gilheumpark-bit/cs-quill-cli)
+[![Tests](https://img.shields.io/badge/tests-411%20passed-brightgreen)](https://github.com/gilheumpark-bit/cs-quill-cli)
+[![Coverage](https://img.shields.io/badge/coverage-43%25%20stmts-yellow)](https://github.com/gilheumpark-bit/cs-quill-cli)
 [![License](https://img.shields.io/badge/license-Dual%20(CC--BY--NC%20%2B%20Commercial)-blue)](./LICENSE)
 
 ---
@@ -29,7 +29,7 @@ CS Quill is a **local-first, AI-powered code quality CLI** that integrates 56 op
 - **SEAL Contract Generation** — AI generates code in parallel using structured contracts, not chat
 - **Multi-Key Auto-Fallback** — Cascading key rotation across providers (Google → Anthropic → OpenAI → Groq)
 - **Offline-First** — 10 self-healing rules work without any AI API
-- **WebSocket Daemon** — Real-time connection to VS Code and web apps (252 RPS, 1000-req tested)
+- **WebSocket Daemon** — Real-time connection to VS Code and web apps (throughput configurable via `cs stress`)
 - **4 Languages** — Korean, English, Japanese, Chinese command aliases (35+ aliases)
 - **SBOM Generation** — CycloneDX 1.5 / SPDX 2.3 compliance reporting
 - **HMAC Receipt Chain** — Tamper-proof SHA-256 audit trail for every verification
@@ -37,21 +37,18 @@ CS Quill is a **local-first, AI-powered code quality CLI** that integrates 56 op
 ### Battle-Tested
 
 ```
-274/274 automated tests PASSED (0 skip, 0 fail)
-  30 core module tests
-  24 pipeline + analysis tests
-  14 daemon HTTP/WebSocket tests
-  67 adapter tests
-  51 integration tests
-  88 extended core tests
+411/411 automated tests PASSED (10 suites, 0 skip, 0 fail)
+  ~43% statement coverage
 
 46 manual E2E tests PASSED
 7 AI integration tests PASSED (Gemini 2.5 Flash)
 4 multi-key fallback tests PASSED
-1000-request load test: 0 failures, 252 RPS
-3-minute memory test: no leaks (GC stable at 52MB)
+Daemon smoke test: 10 sequential requests, 0 failures
+Load/stress testing: configurable via `cs stress --url`
 Sandbox escape: 9/10 blocked (process, require, eval, Function)
 npm audit: 0 vulnerabilities
+
+Last verified: 2026-04-06
 ```
 
 ---
@@ -230,6 +227,7 @@ axe-core, depcheck, knip, dependency-cruiser, publint, are-the-types-wrong, oxli
 | `cs completion [shell]` | Shell completion scripts (bash/zsh/fish) |
 | `cs report` | Daily/weekly report from verification receipts |
 | `cs session [action]` | Session management with 30-day auto-expiry |
+| `cs debug <file>` | Node.js inspector debugging (`--inspect <expr>`) |
 | `cs fun [action]` | Easter eggs (poem/quiz/art/fortune/challenge) |
 
 ### Multi-Language Aliases (35+)
@@ -330,12 +328,12 @@ CS Quill works without any AI API connection:
 # .github/workflows/ci.yml
 # Runs on: ubuntu-latest + windows-latest
 # Node versions: 18, 20, 22
-# Steps: install → build → test (274 tests) → smoke test
+# Steps: install → build → test (411 tests) → smoke test
 ```
 
 ```bash
 npm run build          # TypeScript → dist/
-npm test               # 274 tests, 0 fail
+npm test               # 411 tests, 0 fail
 npm run test:coverage  # Coverage report
 npm run test:ci        # CI mode (--ci --coverage --forceExit)
 ```

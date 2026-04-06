@@ -20,18 +20,95 @@ interface FunctionInfo {
 }
 
 function extractFunctions(code: string): FunctionInfo[] {
+  // --- AST-based extraction via ts-morph (preferred) ---
+  try {
+    const { Project, SyntaxKind } = require('ts-morph');
+    const project = new Project({ useInMemoryFileSystem: true });
+    const src = project.createSourceFile('__bench_input.ts', code);
+    const functions: FunctionInfo[] = [];
+
+    // Function declarations: function foo() {} / export function foo() {}
+    for (const fn of src.getFunctions()) {
+      const name = fn.getName();
+      if (!name) continue;
+      const startLine = fn.getStartLineNumber();
+      const endLine = fn.getEndLineNumber();
+      const body = fn.getText();
+      const complexity = (body.match(/\bif\b|\belse\b|\bcase\b|\b\?\s/g) ?? []).length + 1;
+      functions.push({
+        name,
+        line: startLine,
+        length: endLine - startLine + 1,
+        isAsync: fn.isAsync(),
+        complexity,
+      });
+    }
+
+    // Exported arrow functions: export const foo = () => {} / const foo = async () => {}
+    for (const vs of src.getVariableStatements()) {
+      for (const decl of vs.getDeclarations()) {
+        const init = decl.getInitializer();
+        if (!init) continue;
+        const kind = init.getKind();
+        if (kind !== SyntaxKind.ArrowFunction && kind !== SyntaxKind.FunctionExpression) continue;
+        const name = decl.getName();
+        const startLine = vs.getStartLineNumber();
+        const endLine = vs.getEndLineNumber();
+        const body = vs.getText();
+        const isAsync = /async/.test(body.split('=>')[0] || '');
+        const complexity = (body.match(/\bif\b|\belse\b|\bcase\b|\b\?\s/g) ?? []).length + 1;
+        functions.push({ name, line: startLine, length: endLine - startLine + 1, isAsync, complexity });
+      }
+    }
+
+    if (functions.length > 0) return functions;
+  } catch {
+    // ts-morph not available — fall through to regex
+  }
+
+  // --- Fallback: improved regex (skips comments) ---
   const functions: FunctionInfo[] = [];
   const lines = code.split('\n');
 
+  // Strip comments to avoid false positives like "// function length"
+  let inBlockComment = false;
+  const cleanLines: (string | null)[] = lines.map(raw => {
+    let line = raw;
+    // Handle block comments
+    if (inBlockComment) {
+      const endIdx = line.indexOf('*/');
+      if (endIdx === -1) return null; // entire line inside block comment
+      line = line.slice(endIdx + 2);
+      inBlockComment = false;
+    }
+    // Remove block comments that start and end on the same line
+    line = line.replace(/\/\*.*?\*\//g, '');
+    // Check if a block comment starts on this line without ending
+    const startIdx = line.indexOf('/*');
+    if (startIdx !== -1) {
+      line = line.slice(0, startIdx);
+      inBlockComment = true;
+    }
+    // Remove single-line comments
+    line = line.replace(/\/\/.*$/, '');
+    return line;
+  });
+
+  const fnDeclRegex = /^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)/;
+  const arrowRegex = /^\s*(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>/;
+
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const match = line.match(/(?:export\s+)?(?:async\s+)?function\s+(\w+)|(?:export\s+)?(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s+)?(?:\([^)]*\)|[a-zA-Z_]\w*)\s*=>/);
-    if (!match) continue;
+    const clean = cleanLines[i];
+    if (clean === null) continue; // line was inside a block comment
 
-    const name = match[1] || match[2];
-    const isAsync = /async/.test(line);
+    const fnMatch = clean.match(fnDeclRegex);
+    const arrowMatch = !fnMatch ? clean.match(arrowRegex) : null;
+    if (!fnMatch && !arrowMatch) continue;
 
-    // Estimate function length (count lines until matching brace)
+    const name = fnMatch ? fnMatch[1] : arrowMatch![1];
+    const isAsync = /async/.test(clean);
+
+    // Find function body end by tracking brace depth
     let depth = 0;
     let started = false;
     let endLine = i;
@@ -43,7 +120,7 @@ function extractFunctions(code: string): FunctionInfo[] {
       if (started && depth <= 0) { endLine = j; break; }
     }
 
-    // Estimate cyclomatic complexity
+    // Estimate cyclomatic complexity from actual body
     const body = lines.slice(i, endLine + 1).join('\n');
     const complexity = (body.match(/\bif\b|\belse\b|\bcase\b|\b\?\s/g) ?? []).length + 1;
 

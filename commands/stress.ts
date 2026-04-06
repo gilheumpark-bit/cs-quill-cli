@@ -409,7 +409,8 @@ interface CPUStressResult {
   minMs: number;
   maxMs: number;
   errors: number;
-  throughput: number;
+  throughput: number;       // net: successful calls only
+  grossThroughput?: number; // gross: all calls including failures
   timings: number[];
 }
 
@@ -419,8 +420,10 @@ async function runCPUStress(
   iterations: number,
   code: string,
   fnName: string,
+  dummyArgs: any[] = [],
 ): Promise<CPUStressResult> {
   const timings: number[] = [];
+  const successTimings: number[] = [];
   let errors = 0;
 
   if (targetFn) {
@@ -428,43 +431,60 @@ async function runCPUStress(
     const batchCount = Math.ceil(iterations / concurrency);
     for (let batch = 0; batch < batchCount; batch++) {
       const batchSize = Math.min(concurrency, iterations - batch * concurrency);
-      const promises: Promise<number>[] = [];
+      const promises: Promise<{ elapsed: number; ok: boolean }>[] = [];
       for (let i = 0; i < batchSize; i++) {
         promises.push((async () => {
           const t0 = performance.now();
+          let ok = true;
           try {
-            await targetFn!();
+            await targetFn!(...dummyArgs);
           } catch {
             errors++;
+            ok = false;
           }
-          return performance.now() - t0;
+          return { elapsed: performance.now() - t0, ok };
         })());
       }
-      const batchTimings = await Promise.all(promises);
-      timings.push(...batchTimings);
+      const batchResults = await Promise.all(promises);
+      for (const r of batchResults) {
+        timings.push(r.elapsed);
+        if (r.ok) successTimings.push(r.elapsed);
+      }
     }
   } else {
     // Fallback: use computeStaticMetrics as CPU benchmark
     for (let i = 0; i < iterations; i++) {
       const t0 = performance.now();
       computeStaticMetrics(code);
-      timings.push(performance.now() - t0);
+      const elapsed = performance.now() - t0;
+      timings.push(elapsed);
+      successTimings.push(elapsed);
     }
   }
 
   timings.sort((a, b) => a - b);
-  const avg = timings.length > 0 ? timings.reduce((a, b) => a + b, 0) / timings.length : 0;
+  successTimings.sort((a, b) => a - b);
+  const totalCalls = timings.length;
+  const successCount = successTimings.length;
+  const avg = successTimings.length > 0 ? successTimings.reduce((a, b) => a + b, 0) / successTimings.length : 0;
   const totalTime = timings.reduce((a, b) => a + b, 0);
+  const successTime = successTimings.reduce((a, b) => a + b, 0);
+
+  // Net throughput: only successful calls
+  const netThroughput = successTime > 0 ? Math.round(successCount / (successTime / 1000 / concurrency) * 100) / 100 : 0;
+  // Gross throughput: all calls (including failures)
+  const grossThroughput = totalTime > 0 ? Math.round(totalCalls / (totalTime / 1000 / concurrency) * 100) / 100 : 0;
 
   return {
     avgMs: Math.round(avg * 100) / 100,
-    p50Ms: timings.length > 0 ? Math.round(timings[Math.floor(timings.length * 0.5)] * 100) / 100 : 0,
-    p95Ms: timings.length > 0 ? Math.round(timings[Math.floor(timings.length * 0.95)] * 100) / 100 : 0,
-    p99Ms: timings.length > 0 ? Math.round(timings[Math.floor(timings.length * 0.99)] * 100) / 100 : 0,
-    minMs: timings.length > 0 ? Math.round(timings[0] * 100) / 100 : 0,
-    maxMs: timings.length > 0 ? Math.round(timings[timings.length - 1] * 100) / 100 : 0,
+    p50Ms: successTimings.length > 0 ? Math.round(successTimings[Math.floor(successTimings.length * 0.5)] * 100) / 100 : 0,
+    p95Ms: successTimings.length > 0 ? Math.round(successTimings[Math.floor(successTimings.length * 0.95)] * 100) / 100 : 0,
+    p99Ms: successTimings.length > 0 ? Math.round(successTimings[Math.floor(successTimings.length * 0.99)] * 100) / 100 : 0,
+    minMs: successTimings.length > 0 ? Math.round(successTimings[0] * 100) / 100 : 0,
+    maxMs: successTimings.length > 0 ? Math.round(successTimings[successTimings.length - 1] * 100) / 100 : 0,
     errors,
-    throughput: totalTime > 0 ? Math.round(timings.length / (totalTime / 1000 / concurrency) * 100) / 100 : 0,
+    throughput: netThroughput,
+    grossThroughput,
     timings,
   };
 }
@@ -475,6 +495,7 @@ async function runWorkerCPUStress(
   fnName: string,
   concurrency: number,
   iterations: number,
+  dummyArgs: any[] = [],
 ): Promise<CPUStressResult | null> {
   try {
     const { Worker, isMainThread } = require('worker_threads');
@@ -487,59 +508,76 @@ async function runWorkerCPUStress(
         const mod = require(workerData.targetPath);
         const fn = mod[workerData.fnName];
         if (typeof fn !== 'function') {
-          parentPort.postMessage({ timings: [], errors: 1 });
+          parentPort.postMessage({ successTimings: [], failTimings: [], errors: 1 });
           return;
         }
-        const timings = [];
+        const args = workerData.dummyArgs || [];
+        const successTimings = [];
+        const failTimings = [];
         let errors = 0;
         for (let i = 0; i < workerData.iterations; i++) {
           const t0 = performance.now();
-          try { await fn(); } catch { errors++; }
-          timings.push(performance.now() - t0);
+          try {
+            await fn(...args);
+            successTimings.push(performance.now() - t0);
+          } catch {
+            errors++;
+            failTimings.push(performance.now() - t0);
+          }
         }
-        parentPort.postMessage({ timings, errors });
+        parentPort.postMessage({ successTimings, failTimings, errors });
       })();
     `;
 
     const resolvedPath = path.resolve(targetPath);
-    const workers: Promise<{ timings: number[]; errors: number }>[] = [];
+    const workers: Promise<{ successTimings: number[]; failTimings: number[]; errors: number }>[] = [];
     const activeWorkers = Math.min(concurrency, 8); // cap at 8 workers
 
     for (let i = 0; i < activeWorkers; i++) {
       workers.push(new Promise((resolve, reject) => {
         const w = new Worker(workerCode, {
           eval: true,
-          workerData: { targetPath: resolvedPath, fnName, iterations: perWorker },
+          workerData: { targetPath: resolvedPath, fnName, iterations: perWorker, dummyArgs },
         });
         w.on('message', (msg: any) => resolve(msg));
-        w.on('error', (err: Error) => resolve({ timings: [], errors: perWorker }));
+        w.on('error', (err: Error) => resolve({ successTimings: [], failTimings: [], errors: perWorker }));
         w.on('exit', (exitCode: number) => {
-          if (exitCode !== 0) resolve({ timings: [], errors: perWorker });
+          if (exitCode !== 0) resolve({ successTimings: [], failTimings: [], errors: perWorker });
         });
       }));
     }
 
     const results = await Promise.all(workers);
     const allTimings: number[] = [];
+    const allSuccessTimings: number[] = [];
     let totalErrors = 0;
     for (const r of results) {
-      allTimings.push(...r.timings);
+      allSuccessTimings.push(...r.successTimings);
+      allTimings.push(...r.successTimings, ...r.failTimings);
       totalErrors += r.errors;
     }
 
     allTimings.sort((a, b) => a - b);
-    const avg = allTimings.length > 0 ? allTimings.reduce((a, b) => a + b, 0) / allTimings.length : 0;
+    allSuccessTimings.sort((a, b) => a - b);
+    const totalCalls = allTimings.length;
+    const successCount = allSuccessTimings.length;
+    const avg = allSuccessTimings.length > 0 ? allSuccessTimings.reduce((a, b) => a + b, 0) / allSuccessTimings.length : 0;
     const totalTime = allTimings.reduce((a, b) => a + b, 0);
+    const successTime = allSuccessTimings.reduce((a, b) => a + b, 0);
+
+    const netThroughput = successTime > 0 ? Math.round(successCount / (successTime / 1000 / activeWorkers) * 100) / 100 : 0;
+    const grossThroughput = totalTime > 0 ? Math.round(totalCalls / (totalTime / 1000 / activeWorkers) * 100) / 100 : 0;
 
     return {
       avgMs: Math.round(avg * 100) / 100,
-      p50Ms: allTimings.length > 0 ? Math.round(allTimings[Math.floor(allTimings.length * 0.5)] * 100) / 100 : 0,
-      p95Ms: allTimings.length > 0 ? Math.round(allTimings[Math.floor(allTimings.length * 0.95)] * 100) / 100 : 0,
-      p99Ms: allTimings.length > 0 ? Math.round(allTimings[Math.floor(allTimings.length * 0.99)] * 100) / 100 : 0,
-      minMs: allTimings.length > 0 ? Math.round(allTimings[0] * 100) / 100 : 0,
-      maxMs: allTimings.length > 0 ? Math.round(allTimings[allTimings.length - 1] * 100) / 100 : 0,
+      p50Ms: allSuccessTimings.length > 0 ? Math.round(allSuccessTimings[Math.floor(allSuccessTimings.length * 0.5)] * 100) / 100 : 0,
+      p95Ms: allSuccessTimings.length > 0 ? Math.round(allSuccessTimings[Math.floor(allSuccessTimings.length * 0.95)] * 100) / 100 : 0,
+      p99Ms: allSuccessTimings.length > 0 ? Math.round(allSuccessTimings[Math.floor(allSuccessTimings.length * 0.99)] * 100) / 100 : 0,
+      minMs: allSuccessTimings.length > 0 ? Math.round(allSuccessTimings[0] * 100) / 100 : 0,
+      maxMs: allSuccessTimings.length > 0 ? Math.round(allSuccessTimings[allSuccessTimings.length - 1] * 100) / 100 : 0,
       errors: totalErrors,
-      throughput: totalTime > 0 ? Math.round(allTimings.length / (totalTime / 1000 / activeWorkers) * 100) / 100 : 0,
+      throughput: netThroughput,
+      grossThroughput,
       timings: allTimings,
     };
   } catch {
@@ -617,6 +655,8 @@ export async function runStress(targetPath: string, opts: StressOptions): Promis
   console.log('\n  [Phase 2a] CPU execution stress...');
   let targetFn: ((...args: any[]) => any) | null = null;
   let fnName = '<module>';
+  let fnParamCount = 0;
+  let dummyArgs: any[] = [];
 
   try {
     const resolved = path.resolve(targetPath);
@@ -625,30 +665,85 @@ export async function runStress(targetPath: string, opts: StressOptions): Promis
     if (exportKeys.length > 0) {
       fnName = exportKeys[0];
       targetFn = targetModule[fnName];
+      fnParamCount = targetFn!.length; // .length gives declared parameter count
+
+      // Try to detect parameter info from source and build dummy args
+      if (fnParamCount > 0) {
+        // Build dummy values based on parameter count
+        for (let pi = 0; pi < fnParamCount; pi++) {
+          dummyArgs.push(undefined);
+        }
+        // Try smarter detection from source code
+        const fnSrcMatch = code.match(
+          new RegExp(`(?:function\\s+${fnName}|(?:const|let|var)\\s+${fnName}\\s*=\\s*(?:async\\s+)?(?:function\\s*)?)[\\s]*\\(([^)]*)\\)`)
+        );
+        if (fnSrcMatch?.[1]) {
+          const params = fnSrcMatch[1].split(',').map((p: string) => p.trim()).filter(Boolean);
+          dummyArgs = params.map((p: string) => {
+            const lower = p.replace(/[?:].*/s, '').trim().toLowerCase();
+            if (/num|count|size|len|index|id|port|limit|max|min|amount|qty/i.test(lower)) return 0;
+            if (/str|name|path|url|text|msg|key|label|title|file/i.test(lower)) return '';
+            if (/arr|list|items|data|values|args/i.test(lower)) return [];
+            if (/obj|config|opts|options|params|settings|props/i.test(lower)) return {};
+            if (/bool|flag|enabled|disabled|active|visible|is[A-Z]/i.test(lower)) return false;
+            if (/fn|func|callback|handler|cb|resolver/i.test(lower)) return () => {};
+            return undefined;
+          });
+        }
+      }
     }
   } catch { /* file may not be directly require-able */ }
+
+  // Warm-up: validate function works before real benchmark
+  let warmupPassed = true;
+  if (targetFn) {
+    console.log(`        Warm-up: testing ${fnName}(${fnParamCount > 0 ? dummyArgs.map((a: any) => JSON.stringify(a)).join(', ') : ''})...`);
+    try {
+      await targetFn(...dummyArgs);
+      console.log('        Warm-up: OK');
+    } catch (warmupErr: any) {
+      warmupPassed = false;
+      const errMsg = warmupErr?.message ?? String(warmupErr);
+      console.log(`        Warm-up: FAILED -- ${errMsg}`);
+      if (fnParamCount > 0) {
+        console.log(`        Function requires ${fnParamCount} argument(s) -- skipping real benchmark`);
+        console.log('        (dummy args could not satisfy the function signature)');
+      } else {
+        console.log('        Function threw on zero-arg call -- skipping real benchmark');
+      }
+      console.log('        Falling back to static analysis benchmark as CPU load.');
+      targetFn = null;
+    }
+  }
 
   // Try worker_threads first for true parallel CPU stress
   let cpuResult: CPUStressResult | null = null;
   if (targetFn) {
     console.log(`        Target: ${fnName} | Concurrency: ${profile.concurrency} | Iterations: ${profile.iterations}`);
 
-    cpuResult = await runWorkerCPUStress(targetPath, fnName, profile.concurrency, profile.iterations);
+    cpuResult = await runWorkerCPUStress(targetPath, fnName, profile.concurrency, profile.iterations, dummyArgs);
     if (cpuResult) {
       console.log('        Mode: worker_threads (true parallel)');
     } else {
       console.log('        Mode: Promise batches (async concurrent)');
-      cpuResult = await runCPUStress(targetFn, profile.concurrency, profile.iterations, code, fnName);
+      cpuResult = await runCPUStress(targetFn, profile.concurrency, profile.iterations, code, fnName, dummyArgs);
     }
   } else {
-    console.log('        No exported function found. Using static analysis benchmark as CPU load.');
-    cpuResult = await runCPUStress(null, profile.concurrency, profile.iterations, code, fnName);
+    if (warmupPassed) {
+      console.log('        No exported function found. Using static analysis benchmark as CPU load.');
+    }
+    cpuResult = await runCPUStress(null, profile.concurrency, profile.iterations, code, fnName, []);
   }
 
+  const totalCalls = cpuResult.timings.length;
+  const successCalls = totalCalls - cpuResult.errors;
+  const errorRatePct = totalCalls > 0 ? (cpuResult.errors / totalCalls * 100) : 0;
   console.log(`        Avg: ${cpuResult.avgMs.toFixed(2)}ms | Min: ${cpuResult.minMs.toFixed(2)}ms | Max: ${cpuResult.maxMs.toFixed(2)}ms`);
   console.log(`        p50: ${cpuResult.p50Ms.toFixed(2)}ms | p95: ${cpuResult.p95Ms.toFixed(2)}ms | p99: ${cpuResult.p99Ms.toFixed(2)}ms`);
-  console.log(`        Errors: ${cpuResult.errors}/${cpuResult.timings.length} (${(cpuResult.errors / Math.max(cpuResult.timings.length, 1) * 100).toFixed(1)}%)`);
-  console.log(`        Throughput: ~${cpuResult.throughput} ops/s (concurrent ${profile.concurrency})`);
+  console.log(`        Calls: ${successCalls} ok / ${cpuResult.errors} failed / ${totalCalls} total`);
+  console.log(`        ERROR RATE: ${errorRatePct.toFixed(1)}%${errorRatePct > 5 ? ' [HIGH]' : errorRatePct > 0 ? ' [WARNING]' : ''}`);
+  console.log(`        Throughput (net,  success only): ~${cpuResult.throughput} ops/s`);
+  console.log(`        Throughput (gross, all calls):   ~${cpuResult.grossThroughput ?? cpuResult.throughput} ops/s`);
 
   const cpuGrade = cpuResult.p95Ms < 1 ? 'A' : cpuResult.p95Ms < 10 ? 'B' : cpuResult.p95Ms < 100 ? 'C' : 'D';
   console.log(`        CPU grade: ${cpuGrade}`);
