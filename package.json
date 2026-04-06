@@ -33,6 +33,7 @@
     "LICENSE"
   ],
   "scripts": {
+    "compile": "tsc",
     "build": "tsc",
     "build:watch": "tsc --watch",
     "start": "node dist/bin/cs.js",
