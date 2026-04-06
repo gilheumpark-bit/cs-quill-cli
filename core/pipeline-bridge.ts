@@ -18,6 +18,22 @@ export interface Finding {
   message: string;
 }
 
+/** 팀 레이어 내부 finding — severity로 점수 계산 후 verdict Finding으로 변환 */
+export interface TeamRawFinding {
+  line: number;
+  message: string;
+  severity?: 'error' | 'warning' | 'info' | 'critical';
+  ruleId?: string;
+  confidence?: string;
+  [key: string]: unknown;
+}
+
+export interface TeamPipelineChunk {
+  name: string;
+  score: number;
+  findings: TeamRawFinding[];
+}
+
 export interface PipelineResult {
   verdict: 'pass' | 'review' | 'fail';
   teams: Array<{
@@ -61,7 +77,7 @@ function filterTeamFindings(
 }
 
 export async function runStaticPipeline(code: string, language: string): Promise<PipelineResult> {
-  const teams: PipelineResult['teams'] = [];
+  const teams: TeamPipelineChunk[] = [];
 
   // Team 1: Regex (표면 패턴 — 항상 실행, 1차 필터)
   teams.push(filterTeamFindings(runRegexTeam(code, language), code));
@@ -146,9 +162,9 @@ export async function runStaticPipeline(code: string, language: string): Promise
   teams.push(filterTeamFindings(runSecurityPatternCheck(code, language), code));
 
   // ── Verdict 변환: score 기반 → level 기반 ──
-  const verdictTeams: PipelineResult['teams'] = teams.map(t => ({
+  const verdictTeams: PipelineResult['teams'] = teams.map((t: TeamPipelineChunk) => ({
     name: t.name,
-    findings: (t.findings as any[]).slice(0, 15).map((f: any) => ({
+    findings: t.findings.slice(0, 15).map((f: TeamRawFinding) => ({
       ruleId: `${t.name}/${(f.message || '').slice(0, 30).replace(/\s+/g, '-').toLowerCase()}`,
       line: f.line ?? 0,
       level: mapToLevel(f.severity ?? 'warning', f.message ?? ''),
@@ -198,13 +214,13 @@ function mapToConfidence(severity: string, _message: string): 'high' | 'medium' 
 // PART 2 — Team Implementations
 // ============================================================
 
-function runRegexTeam(code: string, _language: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runRegexTeam(code: string, _language: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
-  const patterns: Array<{ regex: RegExp; msg: string; severity: 'error' | 'warning'; ruleId: string }> = [
-    { regex: /console\.(log|debug)\(/, msg: 'console.log 발견', severity: 'info' as any, ruleId: 'API-006' },
-    { regex: /TODO|FIXME|HACK|XXX/, msg: 'TODO/FIXME 주석', severity: 'info' as any, ruleId: 'STL-010' },
+  const patterns: Array<{ regex: RegExp; msg: string; severity: TeamRawFinding['severity']; ruleId: string }> = [
+    { regex: /console\.(log|debug)\(/, msg: 'console.log 발견', severity: 'info', ruleId: 'API-006' },
+    { regex: /TODO|FIXME|HACK|XXX/, msg: 'TODO/FIXME 주석', severity: 'info', ruleId: 'STL-010' },
     { regex: /eval\s*\(/, msg: 'eval() 사용 (보안 위험)', severity: 'error', ruleId: 'SEC-006' },
     { regex: /document\.(write|writeln)\(/, msg: 'document.write (XSS)', severity: 'error', ruleId: 'API-009' },
     { regex: /innerHTML\s*=/, msg: 'innerHTML 직접 할당 (XSS)', severity: 'warning', ruleId: 'API-010' },
@@ -212,7 +228,7 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
     { regex: /\/\/\s*@ts-ignore/, msg: '@ts-ignore 사용', severity: 'warning', ruleId: 'TYP-003' },
     { regex: /password\s*=\s*['"`]/, msg: '하드코딩된 패스워드', severity: 'error', ruleId: 'SEC-009' },
     { regex: /\.then\(.*\.catch\(\s*\)/, msg: '빈 catch (에러 무시)', severity: 'warning', ruleId: 'ERR-001' },
-    { regex: /new\s+Date\(\)\.getTime/, msg: 'Date.now() 대신 new Date().getTime()', severity: 'info' as any, ruleId: 'LOG-019' },
+    { regex: /new\s+Date\(\)\.getTime/, msg: 'Date.now() 대신 new Date().getTime()', severity: 'info', ruleId: 'LOG-019' },
   ];
 
   const ruleLinePat = /regex\s*:|\/.*\/[gimsuy]*\s*,|severity\s*:/;
@@ -225,7 +241,7 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
       const cnt = patternCounts.get(p.msg) ?? 0;
       if (cnt >= 3) continue;
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: p.ruleId });
         patternCounts.set(p.msg, cnt + 1);
       }
     }
@@ -235,8 +251,8 @@ function runRegexTeam(code: string, _language: string): PipelineResult['teams'][
   return { name: 'regex', score, findings };
 }
 
-function runASTFallback(code: string, _language: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runASTFallback(code: string, _language: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
   // 함수 길이 검사
@@ -280,8 +296,8 @@ function runASTFallback(code: string, _language: string): PipelineResult['teams'
   return { name: 'ast', score, findings: capped };
 }
 
-function runHollowCheck(code: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runHollowCheck(code: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
   // 빈 함수 탐지
@@ -305,8 +321,8 @@ function runHollowCheck(code: string): PipelineResult['teams'][0] {
   return { name: 'hollow', score, findings };
 }
 
-function runDeadCodeCheck(code: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runDeadCodeCheck(code: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
   for (let i = 0; i < lines.length; i++) {
@@ -316,7 +332,7 @@ function runDeadCodeCheck(code: string): PipelineResult['teams'][0] {
     }
     // 주석 처리된 코드
     if (/^\s*\/\/\s*(const|let|var|function|if|for|while|return|import)\s/.test(lines[i])) {
-      findings.push({ line: i + 1, message: '주석 처리된 코드', severity: 'info' as unknown });
+      findings.push({ line: i + 1, message: '주석 처리된 코드', severity: 'info' });
     }
   }
 
@@ -325,8 +341,8 @@ function runDeadCodeCheck(code: string): PipelineResult['teams'][0] {
   return { name: 'dead-code', score, findings: cappedDead };
 }
 
-function runDesignLintCheck(code: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runDesignLintCheck(code: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
 
   // z-index 하드코딩
   const zMatches = code.match(/z-index:\s*\d+|z-\[\d+\]/g) ?? [];
@@ -344,15 +360,15 @@ function runDesignLintCheck(code: string): PipelineResult['teams'][0] {
   return { name: 'design-lint', score, findings };
 }
 
-function runCognitiveLoadCheck(code: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runCognitiveLoadCheck(code: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
   // 긴 줄 — 파일당 최대 3건 (동일 유형 500건 폭발 방지)
   let lineWarnCount = 0;
   for (let i = 0; i < lines.length; i++) {
     if (lines[i].length > 120 && lineWarnCount < 3) {
-      findings.push({ line: i + 1, message: `줄 길이 ${lines[i].length}자 — 120자 초과`, severity: 'info' as unknown });
+      findings.push({ line: i + 1, message: `줄 길이 ${lines[i].length}자 — 120자 초과`, severity: 'info' });
       lineWarnCount++;
     }
   }
@@ -375,24 +391,24 @@ function runCognitiveLoadCheck(code: string): PipelineResult['teams'][0] {
   return { name: 'cognitive-load', score, findings: cappedCog };
 }
 
-function runBugPatternCheck(code: string, _language: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runBugPatternCheck(code: string, _language: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
-  const bugPatterns: Array<{ regex: RegExp; msg: string; severity: 'error' | 'warning' }> = [
+  const bugPatterns: Array<{ regex: RegExp; msg: string; severity: TeamRawFinding['severity'] }> = [
     { regex: /===?\s*NaN/, msg: '=== NaN 비교 (Number.isNaN 사용)', severity: 'error' },
-    { regex: /typeof\s+\w+\s*===?\s*['"`]undefined['"`]/, msg: 'typeof undefined 비교 대신 nullish 체크 권장', severity: 'info' as unknown },
+    { regex: /typeof\s+\w+\s*===?\s*['"`]undefined['"`]/, msg: 'typeof undefined 비교 대신 nullish 체크 권장', severity: 'info' },
     { regex: /parseInt\(\s*\w+\s*\)/, msg: 'parseInt radix 인수 누락', severity: 'warning' },
-    { regex: /new\s+Array\(\d+\)/, msg: 'new Array(n) → Array.from 권장', severity: 'info' as unknown },
+    { regex: /new\s+Array\(\d+\)/, msg: 'new Array(n) → Array.from 권장', severity: 'info' },
     { regex: /catch\s*\(\s*\)\s*\{/, msg: '에러 변수 없는 catch', severity: 'warning' },
     { regex: /\.forEach\(async/, msg: 'forEach(async) — for...of 사용 권장', severity: 'error' },
-    { regex: /==\s+null[^=]|!=\s+null[^=]/, msg: '== null (=== null || === undefined 권장)', severity: 'info' as unknown },
+    { regex: /==\s+null[^=]|!=\s+null[^=]/, msg: '== null (=== null || === undefined 권장)', severity: 'info' },
   ];
 
   for (let i = 0; i < lines.length; i++) {
     for (const p of bugPatterns) {
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity });
       }
     }
   }
@@ -402,16 +418,16 @@ function runBugPatternCheck(code: string, _language: string): PipelineResult['te
   return { name: 'bug-pattern', score, findings: cappedBug };
 }
 
-function runSecurityPatternCheck(code: string, _language: string): PipelineResult['teams'][0] {
-  const findings: PipelineResult['teams'][0]['findings'] = [];
+function runSecurityPatternCheck(code: string, _language: string): TeamPipelineChunk {
+  const findings: TeamRawFinding[] = [];
   const lines = code.split('\n');
 
-  const secPatterns: Array<{ regex: RegExp; msg: string; severity: 'error' | 'warning' }> = [
+  const secPatterns: Array<{ regex: RegExp; msg: string; severity: TeamRawFinding['severity'] }> = [
     { regex: /eval\(/, msg: 'eval() 사용', severity: 'error' },
     { regex: /new\s+Function\(/, msg: 'new Function() (eval 동등)', severity: 'error' },
     { regex: /dangerouslySetInnerHTML/, msg: 'dangerouslySetInnerHTML (XSS)', severity: 'warning' },
-    { regex: /process\.env\.\w+/, msg: 'process.env 직접 접근 — 환경변수 노출 주의', severity: 'info' as unknown },
-    { regex: /https?:\/\/[^\s'"]+/, msg: 'URL 하드코딩', severity: 'info' as unknown },
+    { regex: /process\.env\.\w+/, msg: 'process.env 직접 접근 — 환경변수 노출 주의', severity: 'info' },
+    { regex: /https?:\/\/[^\s'"]+/, msg: 'URL 하드코딩', severity: 'info' },
     { regex: /BEGIN\s+(RSA|DSA|EC)\s+PRIVATE/, msg: '개인키 하드코딩', severity: 'error' },
     { regex: /api[_-]?key\s*[:=]\s*['"`]\w{10,}/, msg: 'API 키 하드코딩 의심', severity: 'error' },
   ];
@@ -422,7 +438,7 @@ function runSecurityPatternCheck(code: string, _language: string): PipelineResul
     if (ruleDefPattern.test(lines[i])) continue;
     for (const p of secPatterns) {
       if (p.regex.test(lines[i])) {
-        findings.push({ line: i + 1, message: p.msg, severity: p.severity, ruleId: (p as any).ruleId } as any);
+        findings.push({ line: i + 1, message: p.msg, severity: p.severity });
       }
     }
   }

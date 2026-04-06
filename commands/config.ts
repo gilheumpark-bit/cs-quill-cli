@@ -184,9 +184,10 @@ export async function runConfig(action: string): Promise<void> {
 
       const strategy = getSingleKeyStrategy(firstKey.provider, firstKey.model);
       console.log('  태스크별 전략:');
-      for (const [task, s] of Object.entries(strategy)) {
+      for (const [task, raw] of Object.entries(strategy)) {
+        const s = raw as { temperature?: number; tip?: string };
         const tip = s.tip ? ` — ${s.tip}` : '';
-        console.log(`    ${task.padEnd(12)} temp:${s.temperature}${tip}`);
+        console.log(`    ${task.padEnd(12)} temp:${s.temperature ?? ''}${tip}`);
       }
       console.log('');
       break;

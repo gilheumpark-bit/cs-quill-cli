@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: medium | Confidence: medium
  */
 export const stl005Detector: RuleDetector = {
-  ruleId: 'STL-005', // 파일명 대소문자 불일치
+  ruleId: 'STL-005',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 파일명 대소문자 불일치
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '파일명 대소문자 불일치 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-005 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

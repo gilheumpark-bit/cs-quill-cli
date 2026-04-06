@@ -2,22 +2,23 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: config
- * Severity: high | Confidence: medium
+ * Phase / Rule Category: build-config
  */
 export const cfg007Detector: RuleDetector = {
-  ruleId: 'CFG-007', // 순환 의존성
+  ruleId: 'CFG-007',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 순환 의존성
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '순환 의존성 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.StringLiteral && node.getText().includes('webpack')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CFG-007 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

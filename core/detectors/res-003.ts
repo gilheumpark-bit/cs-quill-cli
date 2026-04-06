@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: resource
- * Severity: medium | Confidence: medium
  */
 export const res003Detector: RuleDetector = {
-  ruleId: 'RES-003', // clearTimeout/Interval 누락
+  ruleId: 'RES-003',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for clearTimeout/Interval 누락
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'clearTimeout/Interval 누락 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'RES-003 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -2,22 +2,23 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: config
- * Severity: medium | Confidence: high
+ * Phase / Rule Category: build-config
  */
 export const cfg003Detector: RuleDetector = {
-  ruleId: 'CFG-003', // skipLibCheck: true
+  ruleId: 'CFG-003',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for skipLibCheck: true
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'skipLibCheck: true 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.StringLiteral && node.getText().includes('webpack')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CFG-003 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

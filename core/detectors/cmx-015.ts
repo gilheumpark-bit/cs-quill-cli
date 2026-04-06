@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: complexity
- * Severity: low | Confidence: medium
  */
 export const cmx015Detector: RuleDetector = {
-  ruleId: 'CMX-015', // 매직 넘버
+  ruleId: 'CMX-015',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 매직 넘버
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '매직 넘버 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CMX-015 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

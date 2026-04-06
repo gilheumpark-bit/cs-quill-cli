@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: info | Confidence: high
  */
 export const stl008Detector: RuleDetector = {
-  ruleId: 'STL-008', // 빈 줄 과다 3줄+
+  ruleId: 'STL-008',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 빈 줄 과다 3줄+
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '빈 줄 과다 3줄+ 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-008 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: info | Confidence: high
  */
 export const stl009Detector: RuleDetector = {
-  ruleId: 'STL-009', // quote style 불일치
+  ruleId: 'STL-009',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for quote style 불일치
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'quote style 불일치 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-009 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

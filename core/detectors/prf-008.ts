@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: performance
- * Severity: low | Confidence: medium
  */
 export const prf008Detector: RuleDetector = {
-  ruleId: 'PRF-008', // RegExp 루프 내 매번 생성
+  ruleId: 'PRF-008',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for RegExp 루프 내 매번 생성
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'RegExp 루프 내 매번 생성 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('map')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'PRF-008 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

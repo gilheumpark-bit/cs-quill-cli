@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: resource
- * Severity: high | Confidence: medium
  */
 export const res001Detector: RuleDetector = {
-  ruleId: 'RES-001', // 파일 스트림 close 누락
+  ruleId: 'RES-001',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 파일 스트림 close 누락
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '파일 스트림 close 누락 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'RES-001 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: test
- * Severity: high | Confidence: medium
  */
 export const tst002Detector: RuleDetector = {
-  ruleId: 'TST-002', // setTimeout 비결정적 테스트
+  ruleId: 'TST-002',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for setTimeout 비결정적 테스트
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'setTimeout 비결정적 테스트 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('test')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'TST-002 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

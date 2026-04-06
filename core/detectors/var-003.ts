@@ -1,24 +1,14 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: high | Confidence: high
- */
 export const var003Detector: RuleDetector = {
-  ruleId: 'VAR-003', // 미선언 전역 변수
+  ruleId: 'VAR-003',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 미선언 전역 변수
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '미선언 전역 변수 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.getStatements().forEach(stmt => {
+      const text = stmt.getText().trim();
+      if (/^[a-zA-Z_$]\w*\s*=\s*/.test(text) && !/^(const|let|var|export|import|function|class|type|interface)/.test(text)) {
+        findings.push({ line: stmt.getStartLineNumber(), message: 'implicit global: ' + text.slice(0, 30) });
+      }
     });
-    */
-
     return findings;
-  }
+  },
 };

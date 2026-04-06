@@ -84,7 +84,7 @@ export function analyzeWithProgram(
   }
 
   // createProgram — TypeChecker 포함
-  let program: import('typescript').Program;
+  let program: import('typescript').Program | undefined;
   let checker: import('typescript').TypeChecker;
   let sourceFile: import('typescript').SourceFile;
 
@@ -99,6 +99,8 @@ export function analyzeWithProgram(
       noEmit: true,
       skipLibCheck: true,
       jsx: ts.JsxEmit.ReactJSX,
+      strict: true,
+      strictNullChecks: true,
     });
 
     // 대상 파일의 코드를 직접 주입 (파일 시스템 없이도 동작)
@@ -124,6 +126,8 @@ export function analyzeWithProgram(
       noEmit: true,
       skipLibCheck: true,
       jsx: ts.JsxEmit.ReactJSX,
+      strict: true,
+      strictNullChecks: true,
     }, host);
 
     checker = program.getTypeChecker();
@@ -140,6 +144,7 @@ export function analyzeWithProgram(
     // createProgram 실패 → createSourceFile fallback
     sourceFile = ts.createSourceFile(targetFile, codeToCheck, ts.ScriptTarget.Latest, true);
     checker = null as any;
+    program = undefined;
   }
 
   const lineOf = (node: import('typescript').Node) =>
@@ -306,16 +311,7 @@ export function analyzeWithProgram(
     }
 
     // ── 추가 탐지 규칙 (카탈로그 매핑) ──
-
-    // TYP-001: any 타입
-    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) && node.typeName.text === 'any') {
-      addFinding({ ruleId: 'TYP-001', line: lineOf(node), message: 'any 타입 사용', severity: 'warning', confidence: 'high', evidence: [{ engine: 'typescript-ast', detail: 'TypeReference === any' }] });
-    }
-
-    // TYP-004: ! non-null assertion
-    if (ts.isNonNullExpression(node)) {
-      addFinding({ ruleId: 'TYP-004', line: lineOf(node), message: '! non-null assertion', severity: 'warning', confidence: 'medium', evidence: [{ engine: 'typescript-ast', detail: 'NonNullExpression' }] });
-    }
+    // TYP-001, TYP-004: ts-morph detector 패스(runQuillEngine)에서 처리 — 중복 방지
 
     // API-006: console.log (프로덕션)
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
@@ -419,7 +415,7 @@ export function analyzeWithProgram(
     });
   }
 
-  return { findings: findings.slice(0, 30), scopes, cyclomaticComplexity, nodeCount, enginesUsed };
+  return { findings: findings.slice(0, 80), scopes, cyclomaticComplexity, nodeCount, enginesUsed };
 }
 
 // ============================================================
@@ -467,9 +463,72 @@ export function analyzeWithEsquery(code: string): EngineFinding[] {
 // PART 5 — Unified Runner
 // ============================================================
 
+const TYP_RULE_IDS = new Set([
+  'TYP-001', 'TYP-002', 'TYP-003', 'TYP-004', 'TYP-005', 'TYP-006', 'TYP-007', 'TYP-008', 'TYP-009',
+  'TYP-010', 'TYP-011', 'TYP-012', 'TYP-013', 'TYP-014', 'TYP-015',
+]);
+
+/** ts-morph 등록 디텍터 중 TYP-* 전부 실행 */
+function runTypMorphDetectors(code: string, fileName: string): EngineFinding[] {
+  const out: EngineFinding[] = [];
+  try {
+    const { Project } = require('ts-morph');
+    const project = new Project({
+      useInMemoryFileSystem: true,
+      compilerOptions: {
+        strict: true,
+        strictNullChecks: true,
+        target: ts.ScriptTarget.Latest,
+        module: ts.ModuleKind.ESNext,
+        skipLibCheck: true,
+      },
+    });
+    const sourceFile = project.createSourceFile(fileName, code);
+    const { loadAllDetectors } = require('./detectors');
+    const registry = loadAllDetectors() as { getDetectors: () => Array<{ ruleId: string; detect: (sf: unknown) => Array<{ line: number; message: string }> }> };
+    for (const detector of registry.getDetectors()) {
+      if (!TYP_RULE_IDS.has(detector.ruleId)) continue;
+      const raw = detector.detect(sourceFile);
+      for (const pf of raw) {
+        out.push({
+          ruleId: detector.ruleId,
+          line: pf.line,
+          message: pf.message,
+          severity: 'warning',
+          confidence: 'medium',
+          evidence: [{ engine: 'typescript-ast', detail: `ts-morph detector ${detector.ruleId}` }],
+        });
+      }
+    }
+  } catch {
+    /* ts-morph / detectors 미가용 */
+  }
+  return out;
+}
+
+function mergeFindingsDedupe(base: EngineFinding[], extra: EngineFinding[]): EngineFinding[] {
+  const seen = new Set(base.map(f => `${f.line}:${f.ruleId}`));
+  for (const f of extra) {
+    const k = `${f.line}:${f.ruleId}`;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    base.push(f);
+  }
+  return base;
+}
+
 export function runQuillEngine(code: string, fileName: string = 'temp.ts'): EngineResult {
   // Layer 1+2: TypeScript program
   const result = analyzeWithProgram([fileName], fileName, code);
+
+  // TYP-001~015 (ts-morph 플러그인)
+  try {
+    const typMorph = runTypMorphDetectors(code, fileName);
+    mergeFindingsDedupe(result.findings, typMorph);
+    if (typMorph.length > 0 && !result.enginesUsed.includes('ts-morph-typ')) {
+      result.enginesUsed.push('ts-morph-typ');
+    }
+  } catch { /* optional */ }
 
   // Layer 3: esquery 보조
   try {
@@ -488,6 +547,7 @@ export function runQuillEngine(code: string, fileName: string = 'temp.ts'): Engi
     if (!result.enginesUsed.includes('esquery')) result.enginesUsed.push('esquery');
   } catch { /* esquery 미설치 시 skip */ }
 
+  result.findings = result.findings.slice(0, 80);
   return result;
 }
 

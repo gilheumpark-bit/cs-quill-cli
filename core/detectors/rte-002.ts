@@ -1,24 +1,31 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { PropertyAccessExpression, SyntaxKind } from 'ts-morph';
+import {
+  expressionRootHasOptionalChain,
+  typeHasUndefined,
+} from './rte-helpers';
 
-/**
- * Phase / Rule Category: runtime
- * Severity: critical | Confidence: high
- */
 export const rte002Detector: RuleDetector = {
-  ruleId: 'RTE-002', // undefined dereference
+  ruleId: 'RTE-002',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for undefined dereference
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'undefined dereference 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.forEachDescendant((node) => {
+      if (node.getKind() !== SyntaxKind.PropertyAccessExpression) return;
+      const pae = node as PropertyAccessExpression;
+      if (expressionRootHasOptionalChain(pae)) return;
+      const expr = pae.getExpression();
+      try {
+        const t = expr.getType();
+        if (typeHasUndefined(t)) {
+          findings.push({
+            line: pae.getStartLineNumber(),
+            message: 'undefined 가능 타입에 대한 직접 속성 접근 — ?. 또는 검사 권장',
+          });
+        }
+      } catch {
+        /* ignore */
+      }
     });
-    */
-
     return findings;
-  }
+  },
 };

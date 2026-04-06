@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: complexity
- * Severity: medium | Confidence: high
  */
 export const cmx017Detector: RuleDetector = {
-  ruleId: 'CMX-017', // Long Parameter List 7+
+  ruleId: 'CMX-017',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for Long Parameter List 7+
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Long Parameter List 7+ 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CMX-017 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

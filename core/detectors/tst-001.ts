@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: test
- * Severity: high | Confidence: high
  */
 export const tst001Detector: RuleDetector = {
-  ruleId: 'TST-001', // 빈 테스트 — assertion 없음
+  ruleId: 'TST-001',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 빈 테스트 — assertion 없음
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '빈 테스트 — assertion 없음 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('test')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'TST-001 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

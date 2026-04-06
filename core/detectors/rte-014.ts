@@ -1,24 +1,27 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { BinaryExpression, ForStatement, PropertyAccessExpression, SyntaxKind } from 'ts-morph';
 
-/**
- * Phase / Rule Category: runtime
- * Severity: high | Confidence: medium
- */
+/** for (i <= arr.length) 스타일 off-by-one */
 export const rte014Detector: RuleDetector = {
-  ruleId: 'RTE-014', // off-by-one error
+  ruleId: 'RTE-014',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for off-by-one error
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'off-by-one error 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.forEachDescendant((node) => {
+      if (node.getKind() !== SyntaxKind.ForStatement) return;
+      const fs = node as ForStatement;
+      const cond = fs.getCondition();
+      if (!cond || cond.getKind() !== SyntaxKind.BinaryExpression) return;
+      const be = cond as BinaryExpression;
+      if (be.getOperatorToken().getKind() !== SyntaxKind.LessThanEqualsToken) return;
+      const right = be.getRight();
+      if (right.getKind() !== SyntaxKind.PropertyAccessExpression) return;
+      const pa = right as PropertyAccessExpression;
+      if (pa.getName() !== 'length') return;
+      findings.push({
+        line: fs.getStartLineNumber(),
+        message: 'for 조건 i <= .length — 보통 i < length 가 맞는지 확인 (off-by-one)',
+      });
     });
-    */
-
     return findings;
-  }
+  },
 };

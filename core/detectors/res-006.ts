@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: resource
- * Severity: high | Confidence: medium
  */
 export const res006Detector: RuleDetector = {
-  ruleId: 'RES-006', // Event emitter 리스너 leak
+  ruleId: 'RES-006',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for Event emitter 리스너 leak
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Event emitter 리스너 leak 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'RES-006 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

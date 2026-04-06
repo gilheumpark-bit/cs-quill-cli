@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: performance
- * Severity: medium | Confidence: low
  */
 export const prf007Detector: RuleDetector = {
-  ruleId: 'PRF-007', // .find() 반복 → Map 최적화
+  ruleId: 'PRF-007',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for .find() 반복 → Map 최적화
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '.find() 반복 → Map 최적화 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('map')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'PRF-007 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -15,8 +15,10 @@ export const err001Detector: RuleDetector = {
         const catchClause = node as CatchClause;
         const statements = catchClause.getBlock().getStatements();
         
-        // Block contains no code except possible comments
         if (statements.length === 0) {
+          const blockTxt = catchClause.getBlock().getFullText();
+          if (/\/\/[^\n]*(intentional|best-effort|ignore)/i.test(blockTxt)) return;
+          if (/\/\*[\s\S]*(intentional|best-effort|ignore)/i.test(blockTxt)) return;
           findings.push({ 
             line: catchClause.getStartLineNumber(), 
             message: 'Critical: catch 블록이 비어있습니다 (ERR-001). 에러를 조용히 무시하면 디버깅이 불가능해집니다.' 

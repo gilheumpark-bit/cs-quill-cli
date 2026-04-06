@@ -1,24 +1,8 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { detectSec006 } from './sec-helpers';
 
-/**
- * Phase / Rule Category: security
- * Severity: critical | Confidence: high
- */
+/** eval() 자체는 quill-engine AST에서 SEC-006으로 처리 — 여기서는 중복 제거 */
 export const sec006Detector: RuleDetector = {
-  ruleId: 'SEC-006', // eval() 동적 실행
-  detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for eval() 동적 실행
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'eval() 동적 실행 위반' });
-      // }
-    });
-    */
-
-    return findings;
-  }
+  ruleId: 'SEC-006',
+  detect: detectSec006,
 };

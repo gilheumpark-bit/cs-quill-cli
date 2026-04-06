@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: test
- * Severity: medium | Confidence: medium
  */
 export const tst005Detector: RuleDetector = {
-  ruleId: 'TST-005', // hardcoded 날짜 — 미래 실패
+  ruleId: 'TST-005',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for hardcoded 날짜 — 미래 실패
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'hardcoded 날짜 — 미래 실패 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('test')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'TST-005 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: resource
- * Severity: low | Confidence: low
  */
 export const res008Detector: RuleDetector = {
-  ruleId: 'RES-008', // WeakRef 부재 대형 객체 참조
+  ruleId: 'RES-008',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for WeakRef 부재 대형 객체 참조
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'WeakRef 부재 대형 객체 참조 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'RES-008 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

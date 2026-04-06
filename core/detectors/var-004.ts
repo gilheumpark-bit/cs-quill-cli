@@ -1,24 +1,21 @@
 import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: medium | Confidence: medium
- */
 export const var004Detector: RuleDetector = {
-  ruleId: 'VAR-004', // 변수 shadowing
+  ruleId: 'VAR-004',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 변수 shadowing
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '변수 shadowing 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    const outerNames = new Set<string>();
+    sourceFile.getVariableDeclarations().forEach(d => {
+      if (!d.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration) && !d.getFirstAncestorByKind(SyntaxKind.ArrowFunction)) outerNames.add(d.getName());
     });
-    */
-
+    sourceFile.forEachDescendant(node => {
+      if (node.getKind() === SyntaxKind.VariableDeclaration) {
+        const name = (node as any).getName?.();
+        if (name && outerNames.has(name) && (node.getFirstAncestorByKind(SyntaxKind.FunctionDeclaration) || node.getFirstAncestorByKind(SyntaxKind.ArrowFunction))) {
+          findings.push({ line: node.getStartLineNumber(), message: name + ' shadowing' });
+        }
+      }
+    });
     return findings;
-  }
+  },
 };

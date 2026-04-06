@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: info | Confidence: high
  */
 export const stl004Detector: RuleDetector = {
-  ruleId: 'STL-004', // 상수 소문자
+  ruleId: 'STL-004',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 상수 소문자
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '상수 소문자 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-004 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

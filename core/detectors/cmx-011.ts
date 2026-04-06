@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: complexity
- * Severity: high | Confidence: high
  */
 export const cmx011Detector: RuleDetector = {
-  ruleId: 'CMX-011', // callback hell 4단+
+  ruleId: 'CMX-011',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for callback hell 4단+
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'callback hell 4단+ 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CMX-011 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -1,24 +1,15 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: low | Confidence: high
- */
+import { VariableDeclarationKind } from 'ts-morph';
 export const var008Detector: RuleDetector = {
-  ruleId: 'VAR-008', // 재할당 불필요 let → const
+  ruleId: 'VAR-008',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 재할당 불필요 let → const
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '재할당 불필요 let → const 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.getVariableStatements().forEach(stmt => {
+      if (stmt.getDeclarationKind() !== VariableDeclarationKind.Let) return;
+      for (const d of stmt.getDeclarations()) {
+        try { if (d.findReferencesAsNodes().length <= 2) findings.push({ line: d.getStartLineNumber(), message: d.getName() + ' let->const' }); } catch {}
+      }
     });
-    */
-
     return findings;
-  }
+  },
 };

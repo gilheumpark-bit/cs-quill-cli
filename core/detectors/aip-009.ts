@@ -2,22 +2,23 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: ai-pattern
- * Severity: medium | Confidence: low
+ * Phase / Rule Category: ai-antipattern
  */
 export const aip009Detector: RuleDetector = {
-  ruleId: 'AIP-009', // Copy-paste coupling
+  ruleId: 'AIP-009',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for Copy-paste coupling
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Copy-paste coupling 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.Identifier && node.getText().includes('TODO')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'AIP-009 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

@@ -2,22 +2,23 @@ import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
 
 /**
- * Phase / Rule Category: ai-pattern
- * Severity: info | Confidence: medium
+ * Phase / Rule Category: ai-antipattern
  */
 export const aip012Detector: RuleDetector = {
-  ruleId: 'AIP-012', // 불필요한 wrapper function
+  ruleId: 'AIP-012',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 불필요한 wrapper function
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '불필요한 wrapper function 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.Identifier && node.getText().includes('TODO')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'AIP-012 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

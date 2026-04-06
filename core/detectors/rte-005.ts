@@ -1,24 +1,22 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { ElementAccessExpression, SyntaxKind } from 'ts-morph';
+import { isArrayLengthAsIndex } from './rte-helpers';
 
-/**
- * Phase / Rule Category: runtime
- * Severity: high | Confidence: medium
- */
+/** arr[arr.length] — 대개 범위 밖(일반적으로 length-1까지) */
 export const rte005Detector: RuleDetector = {
-  ruleId: 'RTE-005', // Array 길이 확인 없음
+  ruleId: 'RTE-005',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for Array 길이 확인 없음
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Array 길이 확인 없음 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.forEachDescendant((node) => {
+      if (node.getKind() !== SyntaxKind.ElementAccessExpression) return;
+      const ea = node as ElementAccessExpression;
+      if (isArrayLengthAsIndex(ea)) {
+        findings.push({
+          line: ea.getStartLineNumber(),
+          message: 'arr[arr.length] — 유효 인덱스는 0..length-1. off-by-one 가능성',
+        });
+      }
     });
-    */
-
     return findings;
-  }
+  },
 };

@@ -1,24 +1,7 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
+import { detectSec003 } from './sec-helpers';
 
-/**
- * Phase / Rule Category: security
- * Severity: critical | Confidence: high
- */
 export const sec003Detector: RuleDetector = {
-  ruleId: 'SEC-003', // Command Injection exec()
-  detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for Command Injection exec()
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'Command Injection exec() 위반' });
-      // }
-    });
-    */
-
-    return findings;
-  }
+  ruleId: 'SEC-003',
+  detect: detectSec003,
 };

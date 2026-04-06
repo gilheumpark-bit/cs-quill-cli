@@ -58,23 +58,24 @@ export async function analyzeWithTypeScript(code: string, fileName: string = 'te
 
     // 2. eval() / new Function() 탐지 — AST 기반이므로 규칙 정의 문자열과 혼동 없음
     if (ts.isCallExpression(node)) {
-      const expr = node.expression;
-      if (ts.isIdentifier(expr) && expr.text === 'eval') {
+      const call = node as import('typescript').CallExpression;
+      const expr = call.expression;
+      if (ts.isIdentifier(expr) && expr.getText(sourceFile) === 'eval') {
         findings.push({ line: lineOf(node), message: 'eval() 호출 — 보안 위험', severity: 'error' });
       }
-      if (ts.isNewExpression(node.parent) && ts.isIdentifier((node.parent as any).expression) &&
-          (node.parent as any).expression.text === 'Function') {
+    }
+    if (ts.isNewExpression(node)) {
+      const ne = node as import('typescript').NewExpression;
+      const ctor = ne.expression;
+      if (ts.isIdentifier(ctor) && ctor.getText(sourceFile) === 'Function') {
         findings.push({ line: lineOf(node), message: 'new Function() — eval 동등', severity: 'error' });
       }
-    }
-    // new Function() 직접 탐지
-    if (ts.isNewExpression(node) && ts.isIdentifier(node.expression) && node.expression.text === 'Function') {
-      findings.push({ line: lineOf(node), message: 'new Function() — eval 동등', severity: 'error' });
     }
 
     // 3. == / != 탐지 (=== / !== 권장)
     if (ts.isBinaryExpression(node)) {
-      const op = node.operatorToken.kind;
+      const bin = node as import('typescript').BinaryExpression;
+      const op = bin.operatorToken.kind;
       if (op === ts.SyntaxKind.EqualsEqualsToken) {
         findings.push({ line: lineOf(node), message: '== 사용 — === 권장', severity: 'warning' });
       }
@@ -84,31 +85,41 @@ export async function analyzeWithTypeScript(code: string, fileName: string = 'te
     }
 
     // 4. any 타입 탐지
-    if (ts.isTypeReferenceNode(node) && ts.isIdentifier(node.typeName) && node.typeName.text === 'any') {
-      findings.push({ line: lineOf(node), message: 'TypeScript any 타입 — 타입 안전성 저하', severity: 'warning' });
+    if (ts.isTypeReferenceNode(node)) {
+      const tr = node as import('typescript').TypeReferenceNode;
+      if (ts.isIdentifier(tr.typeName) && tr.typeName.getText(sourceFile) === 'any') {
+        findings.push({ line: lineOf(node), message: 'TypeScript any 타입 — 타입 안전성 저하', severity: 'warning' });
+      }
     }
 
     // 5. console.log 탐지
-    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-      const obj = node.expression.expression;
-      const prop = node.expression.name;
-      if (ts.isIdentifier(obj) && obj.text === 'console' &&
-          (prop.text === 'log' || prop.text === 'debug')) {
-        findings.push({ line: lineOf(node), message: `console.${prop.text}() 발견`, severity: 'info' });
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression((node as import('typescript').CallExpression).expression)) {
+      const propExpr = (node as import('typescript').CallExpression).expression as import('typescript').PropertyAccessExpression;
+      const obj = propExpr.expression;
+      const prop = propExpr.name;
+      if (ts.isIdentifier(obj) && obj.getText(sourceFile) === 'console' &&
+          ts.isIdentifier(prop) && (prop.getText(sourceFile) === 'log' || prop.getText(sourceFile) === 'debug')) {
+        findings.push({ line: lineOf(node), message: `console.${prop.getText(sourceFile)}() 발견`, severity: 'info' });
       }
     }
 
     // 6. 변수 선언/사용 추적 (미사용 변수)
-    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)) {
-      declaredVars.add(node.name.text);
+    if (ts.isVariableDeclaration(node)) {
+      const vd = node as import('typescript').VariableDeclaration;
+      if (ts.isIdentifier(vd.name)) {
+        declaredVars.add(vd.name.getText(sourceFile));
+      }
     }
     if (ts.isIdentifier(node) && !ts.isVariableDeclaration(node.parent)) {
-      usedVars.add(node.text);
+      usedVars.add(node.getText(sourceFile));
     }
 
     // 7. 파라미터 5개 초과
-    if ((ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node)) && node.parameters.length > 5) {
-      findings.push({ line: lineOf(node), message: `파라미터 ${node.parameters.length}개 — 5개 초과`, severity: 'warning' });
+    if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) || ts.isArrowFunction(node)) {
+      const sig = node as import('typescript').SignatureDeclaration;
+      if (sig.parameters.length > 5) {
+        findings.push({ line: lineOf(node), message: `파라미터 ${sig.parameters.length}개 — 5개 초과`, severity: 'warning' });
+      }
     }
 
     ts.forEachChild(node, visit);
@@ -197,30 +208,35 @@ export async function analyzeWithAcorn(code: string) {
     return { findings: [{ line: 1, message: `Parse error: ${(e as Error).message}`, severity: 'error' }] };
   }
 
+  type EstreeLoc = { loc?: { start?: { line?: number } } };
+
   // Esquery: find eval() calls
   const evalCalls = esquery.query(ast as never, 'CallExpression[callee.name="eval"]');
   for (const node of evalCalls) {
-    findings.push({ line: (node as unknown).loc?.start?.line ?? 1, message: 'eval() detected — security risk', severity: 'critical' });
+    const n = node as EstreeLoc;
+    findings.push({ line: n.loc?.start?.line ?? 1, message: 'eval() detected — security risk', severity: 'critical' });
   }
 
   // Esquery: find console.log
   const consoleLogs = esquery.query(ast as never, 'CallExpression[callee.object.name="console"]');
   for (const node of consoleLogs) {
-    findings.push({ line: (node as unknown).loc?.start?.line ?? 1, message: 'console.log detected — remove before production', severity: 'info' });
+    const n = node as EstreeLoc;
+    findings.push({ line: n.loc?.start?.line ?? 1, message: 'console.log detected — remove before production', severity: 'info' });
   }
 
   // Estraverse: count loop nesting
   let loopDepth = 0;
   let maxLoopDepth = 0;
+  const loopTypes = new Set(['ForStatement', 'WhileStatement', 'DoWhileStatement', 'ForInStatement', 'ForOfStatement']);
   traverse(ast as never, {
-    enter(node: unknown) {
-      if (['ForStatement', 'WhileStatement', 'DoWhileStatement', 'ForInStatement', 'ForOfStatement'].includes(node.type)) {
+    enter(node: { type?: string }) {
+      if (node.type && loopTypes.has(node.type)) {
         loopDepth++;
         if (loopDepth > maxLoopDepth) maxLoopDepth = loopDepth;
       }
     },
-    leave(node: unknown) {
-      if (['ForStatement', 'WhileStatement', 'DoWhileStatement', 'ForInStatement', 'ForOfStatement'].includes(node.type)) {
+    leave(node: { type?: string }) {
+      if (node.type && loopTypes.has(node.type)) {
         loopDepth--;
       }
     },
@@ -252,7 +268,8 @@ export async function analyzeWithBabel(code: string) {
 
     // Check for JSX without key prop in map
     for (const error of ast.errors ?? []) {
-      findings.push({ line: (error as unknown).loc?.line ?? 1, message: `Syntax: ${error.message}`, severity: 'error' });
+      const e = error as { message?: string; loc?: { line?: number } };
+      findings.push({ line: e.loc?.line ?? 1, message: `Syntax: ${e.message ?? 'unknown'}`, severity: 'error' });
     }
   } catch (e) {
     findings.push({ line: 1, message: `Babel parse error: ${(e as Error).message}`, severity: 'error' });

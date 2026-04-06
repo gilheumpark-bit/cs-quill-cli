@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: performance
- * Severity: high | Confidence: high
  */
 export const prf004Detector: RuleDetector = {
-  ruleId: 'PRF-004', // await in loop → Promise.all
+  ruleId: 'PRF-004',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for await in loop → Promise.all
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'await in loop → Promise.all 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('map')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'PRF-004 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

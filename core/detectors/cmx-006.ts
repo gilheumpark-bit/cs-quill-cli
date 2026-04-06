@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: complexity
- * Severity: medium | Confidence: high
  */
 export const cmx006Detector: RuleDetector = {
-  ruleId: 'CMX-006', // 생성자 100줄 초과
+  ruleId: 'CMX-006',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 생성자 100줄 초과
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '생성자 100줄 초과 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().split('\n').length > 50) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'CMX-006 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

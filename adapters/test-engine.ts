@@ -208,6 +208,11 @@ export async function runPropertyTests(specs: PropertySpec[]): Promise<PBTResult
   };
 }
 
+/** fast-check 사양 실행 — runPropertyTests 별칭 (index export 호환) */
+export async function runFastCheck(specs: PropertySpec[]): Promise<PBTResult> {
+  return runPropertyTests(specs);
+}
+
 // Convenience: 함수에 대해 자동 PBT 생성
 export async function autoFuzzFunction(
   fnCode: string,

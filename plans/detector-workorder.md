@@ -24,26 +24,28 @@
 
 ## Phase 2: 타입 오류 (TYP 1~15) — AST+Symbol 기반
 
+> **상태 (2026-04):** `core/detectors/typ-001.ts` ~ `typ-015.ts` 구현 + `runQuillEngine`에서 ts-morph TYP 패스 병합. `eh-universe-web/src/cli/core` 동기화됨.
+
 ### Batch 3 (TYP-001 ~ TYP-005)
-- TYP-001: any 무분별 사용 → ✅ quill-engine 구현됨
-- TYP-002: 함수 반환 타입 미선언 → FunctionDeclaration.returnType 체크
-- TYP-003: unsafe type assertion → `as unknown as T` 패턴
-- TYP-004: ! non-null 과용 → ✅ quill-engine 구현됨
-- TYP-005: {} empty object type → TypeReference === {}
+- TYP-001: any 무분별 사용 → ✅ ts-morph (AnyKeyword)
+- TYP-002: 함수 반환 타입 미선언 → ✅ 함수·클래스 메서드·변수 초기화 화살표/함수
+- TYP-003: unsafe type assertion → ✅ `as unknown as`, `as any`
+- TYP-004: ! non-null 과용 → ✅ NonNullExpression
+- TYP-005: {} empty object type → ✅ 빈 TypeLiteral
 
 ### Batch 4 (TYP-006 ~ TYP-010)
-- TYP-006: generics 파라미터 누락 → Generic 호출 시 <> 없음
-- TYP-007: never를 값으로 반환 → ReturnStatement + never type
-- TYP-008: union null|undefined 미처리 → strictNullChecks 위반
-- TYP-009: 함수 오버로드 불일치 → OverloadDeclaration 비교
-- TYP-010: enum non-literal 값 → EnumMember initializer 검사
+- TYP-006: generics 파라미터 누락 → ✅ Promise/Array/Map/Set 인자 없음
+- TYP-007: never를 값으로 반환 → ✅ never 반환 + `return expr` (값 반환)
+- TYP-008: union null|undefined 미처리 → ✅ nullable 타입에 대한 non-optional 속성 접근 (휴리스틱)
+- TYP-009: 함수 오버로드 불일치 → ✅ 오버로드 vs 구현 파라미터 개수
+- TYP-010: enum non-literal 값 → ✅ EnumMember initializer 비리터럴
 
 ### Batch 5 (TYP-011 ~ TYP-015)
-- TYP-011: interface vs type 혼용 → 파일 내 일관성 체크
-- TYP-012: strict 모드 미활성 → tsconfig 검사
-- TYP-013: noImplicitAny 위반 → 파라미터 타입 누락
-- TYP-014: strictNullChecks 위반 → null 가능 접근
-- TYP-015: optional chaining 과용 → 리터럴 객체에 ?. 사용
+- TYP-011: interface vs type 혼용 → ✅ 동일 파일에 interface·type 동시 존재
+- TYP-012: strict 모드 미활성 → ✅ 디스크 `tsconfig.json`의 `strict` (인메모리 단일 파일은 스킵)
+- TYP-013: noImplicitAny 위반 → ✅ 타입·초기값 없는 단순 파라미터 (this 제외)
+- TYP-014: strictNullChecks 위반 → ✅ `getPreEmitDiagnostics` 코드 2531~2538 등
+- TYP-015: optional chaining 과용 → ✅ 객체/배열 리터럴에 `?.` (불필요 가능)
 
 ---
 

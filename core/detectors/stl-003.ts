@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: info | Confidence: low
  */
 export const stl003Detector: RuleDetector = {
-  ruleId: 'STL-003', // boolean is/has/can 없음
+  ruleId: 'STL-003',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for boolean is/has/can 없음
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'boolean is/has/can 없음 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-003 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

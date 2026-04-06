@@ -15,7 +15,10 @@ export const syn001Detector: RuleDetector = {
       const rawMsg = diag.getMessageText();
       const msg = typeof rawMsg === 'string' ? rawMsg : (rawMsg as any).messageText || '';
       
-      if (diag.getCode() === 1005 && (msg.includes(\"'{'\") || msg.includes(\"'}'\"))) {
+      // 템플릿 리터럴에 `}` 단독 사용 시 파서 오류 방지 — 문자열 연결 사용
+      const qBraceOpen = "'" + '{' + "'";
+      const qBraceClose = "'" + '}' + "'";
+      if (diag.getCode() === 1005 && (msg.includes(qBraceOpen) || msg.includes(qBraceClose))) {
         findings.push({ 
           line: diag.getLineNumber() || 1, 
           message: `중괄호 불균형 위반: ${msg}` 

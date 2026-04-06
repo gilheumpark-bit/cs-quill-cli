@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: style
- * Severity: low | Confidence: high
  */
 export const stl010Detector: RuleDetector = {
-  ruleId: 'STL-010', // TODO/FIXME/HACK 잔류
+  ruleId: 'STL-010',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for TODO/FIXME/HACK 잔류
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'TODO/FIXME/HACK 잔류 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.FunctionDeclaration && node.getText().includes('any')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'STL-010 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

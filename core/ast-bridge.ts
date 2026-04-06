@@ -302,7 +302,16 @@ export async function runASTHollowScan(code: string, fileName: string): Promise<
 
   try {
     const { Project, SyntaxKind } = require('ts-morph');
-    const project = new Project({ useInMemoryFileSystem: true });
+    const ts = require('typescript');
+    const project = new Project({
+      useInMemoryFileSystem: true,
+      compilerOptions: {
+        strictNullChecks: true,
+        target: ts.ScriptTarget.ESNext,
+        module: ts.ModuleKind.ESNext,
+        moduleResolution: ts.ModuleResolutionKind.Bundler,
+      },
+    });
     const sourceFile = project.createSourceFile(fileName, code);
 
     // 1. Empty functions (AST precise) — both declarations and const arrows

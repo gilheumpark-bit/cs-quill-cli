@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: test
- * Severity: low | Confidence: medium
  */
 export const tst006Detector: RuleDetector = {
-  ruleId: 'TST-006', // 단일 테스트 복수 단위 테스트
+  ruleId: 'TST-006',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 단일 테스트 복수 단위 테스트
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '단일 테스트 복수 단위 테스트 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('test')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'TST-006 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

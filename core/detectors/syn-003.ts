@@ -15,7 +15,9 @@ export const syn003Detector: RuleDetector = {
       const rawMsg = diag.getMessageText();
       const msg = typeof rawMsg === 'string' ? rawMsg : (rawMsg as any).messageText || '';
       
-      if (diag.getCode() === 1005 && (msg.includes(\"'['\") || msg.includes(\"']'\"))) {
+      const qBrackOpen = "'" + '[' + "'";
+      const qBrackClose = "'" + ']' + "'";
+      if (diag.getCode() === 1005 && (msg.includes(qBrackOpen) || msg.includes(qBrackClose))) {
         findings.push({ 
           line: diag.getLineNumber() || 1, 
           message: `대괄호 불균형 위반: ${msg}` 

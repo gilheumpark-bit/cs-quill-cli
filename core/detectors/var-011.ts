@@ -1,24 +1,15 @@
 import { RuleDetector } from '../detector-registry';
 import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: medium | Confidence: medium
- */
 export const var011Detector: RuleDetector = {
-  ruleId: 'VAR-011', // 전역 오염 window 직접 할당
+  ruleId: 'VAR-011',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 전역 오염 window 직접 할당
-    /*
+    const findings: Array<{ line: number; message: string }> = [];
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '전역 오염 window 직접 할당 위반' });
-      // }
+      if (node.getKind() === SyntaxKind.BinaryExpression) {
+        const t = node.getText();
+        if (/^(window|globalThis)\.\w+\s*=/.test(t)) findings.push({ line: node.getStartLineNumber(), message: 'global pollution: ' + t.slice(0, 40) });
+      }
     });
-    */
-
     return findings;
-  }
+  },
 };

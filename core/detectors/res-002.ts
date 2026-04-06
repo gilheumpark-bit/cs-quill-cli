@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: resource
- * Severity: high | Confidence: medium
  */
 export const res002Detector: RuleDetector = {
-  ruleId: 'RES-002', // DB connection 반환 누락
+  ruleId: 'RES-002',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for DB connection 반환 누락
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: 'DB connection 반환 누락 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('setTimeout')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'RES-002 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }

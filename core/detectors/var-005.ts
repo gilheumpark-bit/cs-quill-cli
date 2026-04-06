@@ -1,24 +1,12 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: medium | Confidence: high
- */
 export const var005Detector: RuleDetector = {
-  ruleId: 'VAR-005', // 미사용 변수
+  ruleId: 'VAR-005',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 미사용 변수
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '미사용 변수 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    sourceFile.getVariableDeclarations().forEach(d => {
+      if (d.getName().startsWith('_')) return;
+      try { if (d.findReferencesAsNodes().length <= 1) findings.push({ line: d.getStartLineNumber(), message: 'unused var: ' + d.getName() }); } catch {}
     });
-    */
-
     return findings;
-  }
+  },
 };

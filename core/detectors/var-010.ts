@@ -1,24 +1,14 @@
 import { RuleDetector } from '../detector-registry';
-import { SyntaxKind } from 'ts-morph';
-
-/**
- * Phase / Rule Category: variable
- * Severity: high | Confidence: high
- */
 export const var010Detector: RuleDetector = {
-  ruleId: 'VAR-010', // 동일 스코프 중복 선언
+  ruleId: 'VAR-010',
   detect: (sourceFile) => {
-    const findings: Array<{line: number, message: string}> = [];
-    
-    // TODO: Implement precise AST matching logic for 동일 스코프 중복 선언
-    /*
-    sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '동일 스코프 중복 선언 위반' });
-      // }
+    const findings: Array<{ line: number; message: string }> = [];
+    const seen = new Map<string, number>();
+    sourceFile.getVariableDeclarations().forEach(d => {
+      const n = d.getName(), l = d.getStartLineNumber();
+      if (seen.has(n)) findings.push({ line: l, message: n + ' duplicate declaration' });
+      else seen.set(n, l);
     });
-    */
-
     return findings;
-  }
+  },
 };

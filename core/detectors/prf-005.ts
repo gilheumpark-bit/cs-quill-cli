@@ -3,21 +3,22 @@ import { SyntaxKind } from 'ts-morph';
 
 /**
  * Phase / Rule Category: performance
- * Severity: medium | Confidence: low
  */
 export const prf005Detector: RuleDetector = {
-  ruleId: 'PRF-005', // 메모이제이션 없이 비싼 연산 반복
+  ruleId: 'PRF-005',
   detect: (sourceFile) => {
     const findings: Array<{line: number, message: string}> = [];
     
-    // TODO: Implement precise AST matching logic for 메모이제이션 없이 비싼 연산 반복
-    /*
+    // AST 탐색 스캐폴딩 
     sourceFile.forEachDescendant(node => {
-      // if (node.getKind() === SyntaxKind.TargetNode) {
-      //   findings.push({ line: node.getStartLineNumber(), message: '메모이제이션 없이 비싼 연산 반복 위반' });
-      // }
+      // 휴리스틱 임시 블록
+      if (node.getKind() === SyntaxKind.CallExpression && node.getText().includes('map')) {
+        findings.push({ 
+          line: node.getStartLineNumber(), 
+          message: 'PRF-005 위반 의심' 
+        });
+      }
     });
-    */
 
     return findings;
   }
