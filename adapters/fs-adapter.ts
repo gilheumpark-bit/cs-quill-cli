@@ -3,8 +3,8 @@
 // ============================================================
 // 웹의 IndexedDB/localStorage → CLI의 로컬 파일시스템.
 
-import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, copyFileSync, renameSync, statSync } from 'fs';
+import { join, dirname } from 'path';
 import { getGlobalConfigDir } from '../core/config';
 
 // ============================================================
@@ -109,3 +109,204 @@ export function cacheSet(hash: string, response: string): void {
 }
 
 // IDENTITY_SEAL: PART-3 | role=ai-cache | inputs=hash,response | outputs=string|null
+
+// ============================================================
+// PART 4 — Atomic File Write
+// ============================================================
+
+/**
+ * Write file atomically: write to temp, verify, then rename.
+ * Prevents data corruption if the process crashes mid-write.
+ */
+export function atomicWriteSync(filePath: string, content: string, encoding: BufferEncoding = 'utf-8'): void {
+  const dir = dirname(filePath);
+  mkdirSync(dir, { recursive: true });
+
+  const tmpPath = filePath + '.tmp.' + process.pid + '.' + Date.now();
+
+  try {
+    writeFileSync(tmpPath, content, encoding);
+
+    // Verify written content matches
+    const written = readFileSync(tmpPath, encoding);
+    if (written.length !== content.length) {
+      throw new Error(`Atomic write verification failed: expected ${content.length} chars, got ${written.length}`);
+    }
+
+    // Atomic rename
+    renameSync(tmpPath, filePath);
+  } catch (err) {
+    // Cleanup temp file on failure
+    try { if (existsSync(tmpPath)) unlinkSync(tmpPath); } catch { /* ignore */ }
+    throw err;
+  }
+}
+
+// IDENTITY_SEAL: PART-4 | role=atomic-write | inputs=filePath,content | outputs=void
+
+// ============================================================
+// PART 5 — File Backup Manager
+// ============================================================
+
+const BACKUP_DIR = () => join(getGlobalConfigDir(), 'backups');
+const MAX_BACKUPS_PER_FILE = 5;
+
+/**
+ * Create a backup of a file before modifying it.
+ * Returns the backup path, or null if backup failed.
+ */
+export function createBackup(filePath: string): string | null {
+  if (!existsSync(filePath)) return null;
+
+  try {
+    const backupDir = BACKUP_DIR();
+    mkdirSync(backupDir, { recursive: true });
+
+    // Use a safe filename: replace path separators and colons
+    const safeName = filePath.replace(/[\\/]/g, '__').replace(/:/g, '_');
+    const timestamp = Date.now();
+    const backupPath = join(backupDir, `${safeName}.${timestamp}`);
+
+    copyFileSync(filePath, backupPath);
+
+    // Prune old backups for this file (keep only MAX_BACKUPS_PER_FILE)
+    pruneBackups(safeName);
+
+    return backupPath;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Restore the most recent backup of a file.
+ * Returns true if restore succeeded.
+ */
+export function restoreBackup(filePath: string): boolean {
+  const backupDir = BACKUP_DIR();
+  if (!existsSync(backupDir)) return false;
+
+  const safeName = filePath.replace(/[\\/]/g, '__').replace(/:/g, '_');
+
+  try {
+    const backups = readdirSync(backupDir)
+      .filter(f => f.startsWith(safeName + '.'))
+      .sort()
+      .reverse();
+
+    if (backups.length === 0) return false;
+
+    const latestBackup = join(backupDir, backups[0]);
+    const dir = dirname(filePath);
+    mkdirSync(dir, { recursive: true });
+    copyFileSync(latestBackup, filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * List available backups for a file.
+ */
+export function listBackups(filePath: string): Array<{ path: string; timestamp: number; size: number }> {
+  const backupDir = BACKUP_DIR();
+  if (!existsSync(backupDir)) return [];
+
+  const safeName = filePath.replace(/[\\/]/g, '__').replace(/:/g, '_');
+
+  try {
+    return readdirSync(backupDir)
+      .filter(f => f.startsWith(safeName + '.'))
+      .sort()
+      .reverse()
+      .map(f => {
+        const fullPath = join(backupDir, f);
+        const tsMatch = f.match(/\.(\d+)$/);
+        const timestamp = tsMatch ? parseInt(tsMatch[1], 10) : 0;
+        let size = 0;
+        try { size = statSync(fullPath).size; } catch { /* skip */ }
+        return { path: fullPath, timestamp, size };
+      });
+  } catch {
+    return [];
+  }
+}
+
+function pruneBackups(safeName: string): void {
+  const backupDir = BACKUP_DIR();
+  try {
+    const backups = readdirSync(backupDir)
+      .filter(f => f.startsWith(safeName + '.'))
+      .sort();
+
+    while (backups.length > MAX_BACKUPS_PER_FILE) {
+      const oldest = backups.shift();
+      if (oldest) {
+        try { unlinkSync(join(backupDir, oldest)); } catch { /* ignore */ }
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+// IDENTITY_SEAL: PART-5 | role=backup-manager | inputs=filePath | outputs=backupPath
+
+// ============================================================
+// PART 6 — Safe File Operations (error-wrapped)
+// ============================================================
+
+/**
+ * Read file safely, returning null on any error.
+ */
+export function safeReadFile(filePath: string, encoding: BufferEncoding = 'utf-8'): string | null {
+  try {
+    if (!existsSync(filePath)) return null;
+    return readFileSync(filePath, encoding);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write file safely with optional backup. Returns success status.
+ */
+export function safeWriteFile(filePath: string, content: string, opts?: {
+  backup?: boolean;
+  atomic?: boolean;
+  encoding?: BufferEncoding;
+}): { success: boolean; backupPath?: string; error?: string } {
+  const encoding = opts?.encoding ?? 'utf-8';
+
+  try {
+    let backupPath: string | undefined;
+    if (opts?.backup && existsSync(filePath)) {
+      backupPath = createBackup(filePath) ?? undefined;
+    }
+
+    if (opts?.atomic) {
+      atomicWriteSync(filePath, content, encoding);
+    } else {
+      mkdirSync(dirname(filePath), { recursive: true });
+      writeFileSync(filePath, content, encoding);
+    }
+
+    return { success: true, backupPath };
+  } catch (err) {
+    return { success: false, error: (err as Error).message };
+  }
+}
+
+/**
+ * Delete file safely, returning success status.
+ */
+export function safeDeleteFile(filePath: string): boolean {
+  try {
+    if (!existsSync(filePath)) return true;
+    unlinkSync(filePath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// IDENTITY_SEAL: PART-6 | role=safe-file-ops | inputs=filePath,content | outputs=result

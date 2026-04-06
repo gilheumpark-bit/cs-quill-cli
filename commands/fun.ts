@@ -145,11 +145,35 @@ const QUIZZES: Quiz[] = [
   },
 ];
 
-export function runQuiz(): void {
+export async function runQuiz(): Promise<void> {
+  console.log('🦔 CS Quill — 코드 퀴즈 🎯\n');
+
+  try {
+    const { quickAsk } = require('../core/ai-bridge');
+
+    const raw = await quickAsk(
+      'Generate a JavaScript/TypeScript code quiz. Return ONLY valid JSON with this exact structure: {"question":"...","code":"...","options":["A) ...","B) ...","C) ...","D) ..."],"answer":0,"explanation":"..."}. The answer field is the 0-based index of the correct option. Make it tricky but educational. Language: Korean for text, English for code.',
+      'You are a programming quiz master. Output ONLY raw JSON, no markdown fences, no extra text.',
+      'creative',
+    );
+
+    const parsed = JSON.parse(raw.replace(/```json?\s*/g, '').replace(/```/g, '').trim());
+    if (parsed.question && parsed.code && parsed.options && typeof parsed.answer === 'number') {
+      console.log(`  Q: ${parsed.question}\n`);
+      console.log(`  \`\`\`\n  ${parsed.code}\n  \`\`\`\n`);
+      for (const opt of parsed.options) {
+        console.log(`  ${opt}`);
+      }
+      console.log(`\n  정답: ${parsed.options[parsed.answer]}`);
+      console.log(`  💡 ${parsed.explanation}\n`);
+      return;
+    }
+  } catch { /* AI unavailable or parse failed, use fallback */ }
+
+  // Fallback: hardcoded quizzes
   if (QUIZZES.length === 0) { console.log('  퀴즈가 없습니다.\n'); return; }
   const quiz = QUIZZES[Math.floor(Math.random() * QUIZZES.length)];
 
-  console.log('🦔 CS Quill — 코드 퀴즈 🎯\n');
   console.log(`  Q: ${quiz.question}\n`);
   console.log(`  \`\`\`\n  ${quiz.code}\n  \`\`\`\n`);
   for (const opt of quiz.options) {
@@ -205,12 +229,33 @@ const FORTUNES = [
   { fortune: '문서를 읽지 않아도 API가 직관적일 것이다 📖', lucky: 'README', avoid: 'RTFM' },
 ];
 
-export function showFortune(): void {
+export async function showFortune(): Promise<void> {
+  console.log('🦔 CS Quill — 오늘의 코딩 운세 🔮\n');
+
+  try {
+    const { quickAsk } = require('../core/ai-bridge');
+    const today = new Date().toISOString().slice(0, 10);
+
+    const raw = await quickAsk(
+      `Today is ${today}. Generate a fun developer fortune cookie. Return ONLY valid JSON: {"fortune":"...","lucky":"...","avoid":"..."}. fortune: a witty coding fortune in Korean with one emoji. lucky: a lucky programming keyword. avoid: something to avoid today. Be creative and different each time.`,
+      'You are a mystical developer fortune teller. Output ONLY raw JSON, no markdown.',
+      'creative',
+    );
+
+    const parsed = JSON.parse(raw.replace(/```json?\s*/g, '').replace(/```/g, '').trim());
+    if (parsed.fortune && parsed.lucky && parsed.avoid) {
+      console.log(`  ${parsed.fortune}\n`);
+      console.log(`  행운의 키워드: ${parsed.lucky}`);
+      console.log(`  피해야 할 것: ${parsed.avoid}\n`);
+      return;
+    }
+  } catch { /* AI unavailable, use fallback */ }
+
+  // Fallback: hardcoded fortunes
   const today = new Date();
   const idx = (today.getFullYear() * 366 + today.getMonth() * 31 + today.getDate()) % FORTUNES.length;
   const fortune = FORTUNES[idx];
 
-  console.log('🦔 CS Quill — 오늘의 코딩 운세 🔮\n');
   console.log(`  ${fortune.fortune}\n`);
   console.log(`  행운의 키워드: ${fortune.lucky}`);
   console.log(`  피해야 할 것: ${fortune.avoid}\n`);
@@ -276,9 +321,36 @@ const CHALLENGES = [
   { title: '디바운서', desc: 'debounce + throttle + cancel 기능', difficulty: '쉬움' },
 ];
 
-export function showChallenge(): void {
-  const ch = CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
+export async function showChallenge(): Promise<void> {
   console.log('🦔 CS Quill — 코딩 챌린지 💪\n');
+
+  try {
+    const { quickAsk } = require('../core/ai-bridge');
+
+    const raw = await quickAsk(
+      'Generate a unique coding challenge for a developer. Return ONLY valid JSON: {"title":"...","desc":"...","difficulty":"쉬움|보통|어려움|매우 어려움","hints":["...","..."]}. Title and description in Korean. Make it practical and educational. Include 2 hints.',
+      'You are a coding challenge designer. Output ONLY raw JSON, no markdown.',
+      'creative',
+    );
+
+    const parsed = JSON.parse(raw.replace(/```json?\s*/g, '').replace(/```/g, '').trim());
+    if (parsed.title && parsed.desc && parsed.difficulty) {
+      console.log(`  [${parsed.difficulty}] ${parsed.title}`);
+      console.log(`  ${parsed.desc}\n`);
+      if (parsed.hints && parsed.hints.length > 0) {
+        console.log('  힌트:');
+        for (const hint of parsed.hints) {
+          console.log(`    - ${hint}`);
+        }
+        console.log('');
+      }
+      console.log(`  만들어보세요: cs generate "${parsed.title}"\n`);
+      return;
+    }
+  } catch { /* AI unavailable, use fallback */ }
+
+  // Fallback: hardcoded challenges
+  const ch = CHALLENGES[Math.floor(Math.random() * CHALLENGES.length)];
   console.log(`  [${ch.difficulty}] ${ch.title}`);
   console.log(`  ${ch.desc}\n`);
   console.log(`  만들어보세요: cs generate "${ch.title}"\n`);
@@ -296,13 +368,13 @@ export async function runFun(action: string, args?: string[]): Promise<void> {
       await generateCodePoem(args?.[0] ?? '사랑');
       break;
     case 'quiz':
-      runQuiz();
+      await runQuiz();
       break;
     case 'art':
       await generateCodeArt(args?.[0] ?? 'cat');
       break;
     case 'fortune':
-      showFortune();
+      await showFortune();
       break;
     case 'quill':
       console.log(QUILL_ART);
@@ -311,7 +383,7 @@ export async function runFun(action: string, args?: string[]): Promise<void> {
       await createApp(args?.join(' ') ?? 'todo app');
       break;
     case 'challenge':
-      showChallenge();
+      await showChallenge();
       break;
     default:
       console.log('🦔 CS Quill — Fun 모드\n');

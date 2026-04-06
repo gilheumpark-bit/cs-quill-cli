@@ -89,31 +89,62 @@ Use Korean. Be encouraging. Use 💡 for tips. Keep it SHORT (3-5 lines per sect
       console.log('\n');
     }
   } catch {
-    // Fallback: 동적 해설 (영수증 finding 기반 + 정적 팁 매핑)
-    const teamTips: Record<string, { what: string; why: string; howPrefix: string }> = {
-      regex: { what: '표면 패턴 검사 (console.log, eval, TODO)', why: '프로덕션에 디버그 코드가 남으면 보안+성능 문제', howPrefix: '해당 라인에서' },
-      ast: { what: 'AST 구조 분석 (함수 길이, 중첩 깊이, 미사용 파라미터)', why: '복잡한 코드는 버그 확률이 높고 리뷰가 어려움', howPrefix: '함수를 50줄 이하로 분리하고' },
-      hollow: { what: '빈 함수/스텁 감지', why: '미구현 코드가 런타임에 예상치 못한 동작', howPrefix: '빈 함수에 실제 로직을 채우거나' },
-      'dead-code': { what: 'return 이후 코드, 주석 처리된 코드', why: '데드코드는 혼란을 주고 번들 크기 증가', howPrefix: '사용하지 않는 코드를 삭제하고' },
-      'design-lint': { what: 'z-index 하드코딩, 매직넘버 색상, 포맷 불일치', why: '디자인 시스템 없으면 UI 일관성 파괴', howPrefix: 'CSS 변수/디자인 토큰을 사용하고' },
-      'cognitive-load': { what: '줄 길이 초과, 중첩 삼항, 파일 크기', why: '읽기 어려운 코드 = 유지보수 비용 증가', howPrefix: '긴 줄을 분리하고 삼항을 if로 변경' },
-      'bug-pattern': { what: '=== NaN, parseInt radix, forEach(async), 빈 catch', why: '자바스크립트 함정 패턴으로 런타임 버그 발생', howPrefix: '' },
-      security: { what: 'eval, innerHTML, 하드코딩 키, 개인키 노출', why: '보안 취약점은 서비스 전체를 위험에 빠뜨림', howPrefix: '' },
+    // Data-driven fallback: load tips from rule-catalog categories
+    const teamCategoryMap: Record<string, string[]> = {
+      regex: ['api-misuse', 'naming-style'],
+      ast: ['syntax', 'type', 'variable', 'complexity'],
+      hollow: ['logic-semantic'],
+      'dead-code': ['logic-semantic', 'variable'],
+      'design-lint': ['naming-style', 'build-tooling'],
+      'cognitive-load': ['complexity'],
+      'bug-pattern': ['runtime', 'async-event', 'error-handling'],
+      security: ['security', 'resource'],
     };
 
+    // Build team tips dynamically from rule-catalog
+    let catalogRules: any[] = [];
+    try {
+      const { RULE_CATALOG } = require('../core/rule-catalog');
+      catalogRules = RULE_CATALOG;
+    } catch { /* skip */ }
+
     for (const team of problemTeams) {
-      const tip = teamTips[team.name];
       console.log(`  ─── ${team.name} (${team.score}/100) ───`);
-      if (tip) {
-        console.log(`  📋 검사 항목: ${tip.what}`);
-        console.log(`  ⚡ 왜 중요: ${tip.why}`);
-        console.log(`  💡 수정법: ${tip.howPrefix} cs verify --precision ${team.name} 으로 상세 확인`);
+
+      const categories = teamCategoryMap[team.name] ?? [];
+      if (catalogRules.length > 0 && categories.length > 0) {
+        // Find relevant rules from catalog for this team's categories
+        const relevantRules = catalogRules.filter((r: any) =>
+          categories.some(cat => r.category === cat || r.category?.includes(cat))
+        );
+
+        // Group by severity for actionable display
+        const critical = relevantRules.filter((r: any) => r.severity === 'critical' || r.severity === 'high');
+        const medium = relevantRules.filter((r: any) => r.severity === 'medium');
+
+        // Show what this team checks based on actual rule titles
+        const sampleTitles = relevantRules.slice(0, 4).map((r: any) => r.title).join(', ');
+        console.log(`  📋 검사 항목: ${sampleTitles || team.name + ' 관련 규칙'}`);
+        console.log(`  📊 관련 규칙: ${relevantRules.length}개 (심각 ${critical.length}, 중간 ${medium.length})`);
+
+        // Show top priority rules as actionable fixes
+        if (critical.length > 0) {
+          console.log('  ⚡ 우선 수정:');
+          for (const rule of critical.slice(0, 3)) {
+            const cweTag = rule.cwe ? ` [${rule.cwe}]` : '';
+            console.log(`     - ${rule.id}: ${rule.title}${cweTag}`);
+          }
+        }
+        console.log(`  💡 cs verify --precision ${team.name} 으로 상세 확인`);
       } else {
         console.log(`  💡 cs verify 로 상세 확인 후 개선하세요.`);
       }
-      // 실제 finding 수 기반 동적 메시지
+
+      // Dynamic message based on actual finding count from receipt
       if (typeof team.findings === 'number' && team.findings > 5) {
         console.log(`  📊 ${team.findings}건 — 가장 빈번한 문제부터 순차 해결 추천`);
+      } else if (typeof team.findings === 'number' && team.findings > 0) {
+        console.log(`  📊 ${team.findings}건 발견 — 빠르게 해결 가능`);
       }
       console.log('');
     }

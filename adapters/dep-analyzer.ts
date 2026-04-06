@@ -248,7 +248,301 @@ export async function detectCodemodOpportunities(rootPath: string) {
 // IDENTITY_SEAL: PART-7 | role=codemod | inputs=rootPath | outputs=opportunities
 
 // ============================================================
-// PART 8 — Unified Dependency Analysis
+// PART 8 — Circular Dependency Detection (자체 import 그래프)
+// ============================================================
+
+export async function detectCircularDeps(rootPath: string) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const graph = new Map<string, string[]>();
+  const cycles: string[][] = [];
+
+  function collectFiles(dir: string, exts: string[]): string[] {
+    const results: string[] = [];
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist') {
+          results.push(...collectFiles(full, exts));
+        } else if (entry.isFile() && exts.some((e: string) => entry.name.endsWith(e))) {
+          results.push(full);
+        }
+      }
+    } catch { /* skip */ }
+    return results;
+  }
+
+  const files = collectFiles(rootPath, ['.ts', '.tsx', '.js', '.jsx', '.mjs']);
+
+  for (const file of files) {
+    try {
+      const content = fs.readFileSync(file, 'utf-8');
+      const rel = path.relative(rootPath, file);
+      const deps: string[] = [];
+
+      // Match import/require patterns
+      const importRe = /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+      let m;
+      while ((m = importRe.exec(content)) !== null) {
+        const mod = m[1] ?? m[2];
+        if (mod.startsWith('.')) {
+          const resolved = path.relative(rootPath, path.resolve(path.dirname(file), mod)).replace(/\\/g, '/');
+          deps.push(resolved);
+        }
+      }
+      graph.set(rel.replace(/\\/g, '/'), deps);
+    } catch { /* skip */ }
+  }
+
+  // DFS cycle detection
+  const visited = new Set<string>();
+  const stack = new Set<string>();
+
+  function dfs(node: string, pathSoFar: string[]): void {
+    if (stack.has(node)) {
+      const cycleStart = pathSoFar.indexOf(node);
+      if (cycleStart >= 0) {
+        cycles.push(pathSoFar.slice(cycleStart).concat(node));
+      }
+      return;
+    }
+    if (visited.has(node)) return;
+    visited.add(node);
+    stack.add(node);
+    pathSoFar.push(node);
+
+    for (const dep of graph.get(node) ?? []) {
+      // Resolve extension-less imports
+      const candidates = [dep, dep + '.ts', dep + '.tsx', dep + '.js', dep + '/index.ts', dep + '/index.js'];
+      for (const c of candidates) {
+        if (graph.has(c)) {
+          dfs(c, [...pathSoFar]);
+          break;
+        }
+      }
+    }
+
+    stack.delete(node);
+  }
+
+  for (const node of graph.keys()) {
+    dfs(node, []);
+  }
+
+  // Deduplicate cycles (same set of nodes)
+  const seen = new Set<string>();
+  const uniqueCycles = cycles.filter(c => {
+    const key = [...c].sort().join('|');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return {
+    totalModules: graph.size,
+    cycles: uniqueCycles.slice(0, 20),
+    cycleCount: uniqueCycles.length,
+    score: Math.max(0, 100 - uniqueCycles.length * 15),
+    engine: 'circular-dep-detect',
+  };
+}
+
+// IDENTITY_SEAL: PART-8 | role=circular-dep | inputs=rootPath | outputs=cycles
+
+// ============================================================
+// PART 9 — Version Mismatch Detection (package.json vs lockfile)
+// ============================================================
+
+export async function detectVersionMismatches(rootPath: string) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const mismatches: Array<{ pkg: string; declared: string; locked: string; severity: string }> = [];
+  const warnings: string[] = [];
+
+  const pkgPath = path.join(rootPath, 'package.json');
+  if (!fs.existsSync(pkgPath)) return { mismatches, warnings, score: 100, engine: 'version-mismatch' };
+
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const allDeclared = { ...pkg.dependencies, ...pkg.devDependencies };
+
+  // Try package-lock.json
+  const lockPath = path.join(rootPath, 'package-lock.json');
+  if (fs.existsSync(lockPath)) {
+    try {
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      const lockPackages = lock.packages ?? {};
+      const lockDeps = lock.dependencies ?? {};
+
+      for (const [name, declaredVersion] of Object.entries(allDeclared)) {
+        const dv = declaredVersion as string;
+        // Check in lockfile v3 (packages) or v1 (dependencies)
+        const lockEntry = lockPackages[`node_modules/${name}`] ?? lockDeps[name];
+        if (!lockEntry) {
+          warnings.push(`${name}: declared in package.json but missing from lockfile`);
+          continue;
+        }
+
+        const lockedVersion = lockEntry.version as string;
+        if (!lockedVersion) continue;
+
+        // Strip semver prefix for comparison
+        const clean = dv.replace(/^[\^~>=<]*/g, '');
+        const major = clean.split('.')[0];
+        const lockedMajor = lockedVersion.split('.')[0];
+
+        if (major && lockedMajor && major !== lockedMajor) {
+          mismatches.push({
+            pkg: name,
+            declared: dv,
+            locked: lockedVersion,
+            severity: 'error',
+          });
+        }
+      }
+    } catch { /* corrupt lockfile */ }
+  }
+
+  // Detect duplicate major versions in dependency tree
+  if (fs.existsSync(lockPath)) {
+    try {
+      const lock = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+      const packages = lock.packages ?? {};
+      const versionMap = new Map<string, string[]>();
+
+      for (const [key, entry] of Object.entries(packages)) {
+        if (!key.includes('node_modules/')) continue;
+        const name = key.split('node_modules/').pop()!;
+        const ver = (entry as any).version;
+        if (!ver || name.startsWith('.')) continue;
+        const existing = versionMap.get(name) ?? [];
+        if (!existing.includes(ver)) existing.push(ver);
+        versionMap.set(name, existing);
+      }
+
+      for (const [name, versions] of versionMap) {
+        if (versions.length > 1) {
+          const majors = new Set(versions.map(v => v.split('.')[0]));
+          if (majors.size > 1) {
+            warnings.push(`${name}: multiple major versions in tree: ${versions.join(', ')}`);
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  const score = Math.max(0, 100 - mismatches.length * 20 - warnings.length * 5);
+  return { mismatches, warnings: warnings.slice(0, 20), score, engine: 'version-mismatch' };
+}
+
+// IDENTITY_SEAL: PART-9 | role=version-mismatch | inputs=rootPath | outputs=mismatches
+
+// ============================================================
+// PART 10 — Unused Dependency Detection (소스 스캔 기반)
+// ============================================================
+
+export async function detectUnusedDepsLocal(rootPath: string) {
+  const fs = require('fs');
+  const path = require('path');
+
+  const pkgPath = path.join(rootPath, 'package.json');
+  if (!fs.existsSync(pkgPath)) return { unused: [], phantomDeps: [], score: 100, engine: 'unused-dep-local' };
+
+  const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
+  const prodDeps = Object.keys(pkg.dependencies ?? {});
+  const devDeps = Object.keys(pkg.devDependencies ?? {});
+
+  // Collect all source content to search for imports
+  function collectSource(dir: string): string {
+    let content = '';
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist' && entry.name !== '.git') {
+          content += collectSource(full);
+        } else if (entry.isFile() && /\.(ts|tsx|js|jsx|mjs|cjs|json|vue|svelte)$/.test(entry.name)) {
+          try { content += fs.readFileSync(full, 'utf-8') + '\n'; } catch { /* skip */ }
+        }
+      }
+    } catch { /* skip */ }
+    return content;
+  }
+
+  const allSource = collectSource(rootPath);
+
+  // Config files that reference packages implicitly
+  const configFiles = ['tsconfig.json', 'jest.config.js', 'jest.config.ts', 'vite.config.ts',
+    'vitest.config.ts', 'webpack.config.js', 'rollup.config.js', '.eslintrc.js', '.eslintrc.json',
+    'tailwind.config.js', 'tailwind.config.ts', 'postcss.config.js', 'next.config.js', 'next.config.mjs'];
+
+  let configContent = '';
+  for (const cf of configFiles) {
+    const cfPath = path.join(rootPath, cf);
+    if (fs.existsSync(cfPath)) {
+      try { configContent += fs.readFileSync(cfPath, 'utf-8') + '\n'; } catch { /* skip */ }
+    }
+  }
+
+  const combinedSource = allSource + configContent;
+
+  // Known implicit dependencies (used by tools, not imported)
+  const implicitDeps = new Set([
+    'typescript', '@types/node', '@types/react', '@types/jest', 'prettier',
+    'eslint', 'husky', 'lint-staged', 'concurrently', 'cross-env',
+  ]);
+
+  const unused: Array<{ name: string; type: 'prod' | 'dev' }> = [];
+  const phantomDeps: string[] = [];
+
+  for (const dep of prodDeps) {
+    if (implicitDeps.has(dep)) continue;
+    // Check if referenced anywhere: import, require, or package name in configs
+    const escapedDep = dep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`['"]${escapedDep}['"/]|from\\s+['"]${escapedDep}|require\\(['"]${escapedDep}`);
+    if (!re.test(combinedSource)) {
+      unused.push({ name: dep, type: 'prod' });
+    }
+  }
+
+  for (const dep of devDeps) {
+    if (implicitDeps.has(dep)) continue;
+    if (dep.startsWith('@types/')) continue; // type packages are implicit
+    const escapedDep = dep.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`['"]${escapedDep}['"/]|from\\s+['"]${escapedDep}|require\\(['"]${escapedDep}`);
+    if (!re.test(combinedSource)) {
+      unused.push({ name: dep, type: 'dev' });
+    }
+  }
+
+  // Phantom deps: imported but not in package.json
+  const importedPkgs = new Set<string>();
+  const importRe = /(?:from\s+['"]|require\s*\(\s*['"])([^./'"@][^'"]*|@[^/'"]+\/[^'"]+)/g;
+  let m;
+  while ((m = importRe.exec(allSource)) !== null) {
+    const pkgName = m[1].includes('/') && m[1].startsWith('@')
+      ? m[1].split('/').slice(0, 2).join('/')
+      : m[1].split('/')[0];
+    importedPkgs.add(pkgName);
+  }
+
+  const allDeclared = new Set([...prodDeps, ...devDeps]);
+  for (const imported of importedPkgs) {
+    if (!allDeclared.has(imported) && !imported.startsWith('node:') && !['fs', 'path', 'os', 'url', 'crypto', 'http', 'https', 'child_process', 'stream', 'util', 'events', 'buffer', 'net', 'tls', 'zlib', 'assert', 'querystring', 'readline'].includes(imported)) {
+      phantomDeps.push(imported);
+    }
+  }
+
+  const score = Math.max(0, 100 - unused.filter(u => u.type === 'prod').length * 10 - unused.filter(u => u.type === 'dev').length * 3 - phantomDeps.length * 15);
+  return { unused: unused.slice(0, 30), phantomDeps: phantomDeps.slice(0, 20), score, engine: 'unused-dep-local' };
+}
+
+// IDENTITY_SEAL: PART-10 | role=unused-dep-local | inputs=rootPath | outputs=unused,phantomDeps
+
+// ============================================================
+// PART 11 — Unified Dependency Analysis
 // ============================================================
 
 export async function runFullDepAnalysis(rootPath: string) {
@@ -270,6 +564,18 @@ export async function runFullDepAnalysis(rootPath: string) {
   const oxlint = await runOxlint(rootPath);
   results.push({ engine: oxlint.engine, score: oxlint.score, detail: `${oxlint.total} issues (${oxlint.errors} errors)` });
 
+  // circular dependency detection (self-scan)
+  const circular = await detectCircularDeps(rootPath);
+  results.push({ engine: circular.engine, score: circular.score, detail: `${circular.cycleCount} circular dependency chains across ${circular.totalModules} modules` });
+
+  // version mismatch detection
+  const versionMismatch = await detectVersionMismatches(rootPath);
+  results.push({ engine: versionMismatch.engine, score: versionMismatch.score, detail: `${versionMismatch.mismatches.length} mismatches, ${versionMismatch.warnings.length} warnings` });
+
+  // unused dependency detection (local source scan)
+  const unusedLocal = await detectUnusedDepsLocal(rootPath);
+  results.push({ engine: unusedLocal.engine, score: unusedLocal.score, detail: `${unusedLocal.unused.length} unused, ${unusedLocal.phantomDeps.length} phantom deps` });
+
   // codemod
   const codemod = await detectCodemodOpportunities(rootPath);
   if (codemod.opportunities.length > 0) {
@@ -280,4 +586,4 @@ export async function runFullDepAnalysis(rootPath: string) {
   return { engines: results.length, results, avgScore };
 }
 
-// IDENTITY_SEAL: PART-8 | role=unified-dep | inputs=rootPath | outputs=results
+// IDENTITY_SEAL: PART-11 | role=unified-dep | inputs=rootPath | outputs=results

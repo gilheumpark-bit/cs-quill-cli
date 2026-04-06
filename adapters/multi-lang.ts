@@ -379,3 +379,296 @@ export function getLanguageStats(): { total: number; tiers: Record<string, numbe
 }
 
 // IDENTITY_SEAL: PART-6 | role=unified-analyzer | inputs=code,fileName | outputs=UniversalASTResult
+
+// ============================================================
+// PART 7 — Language-Specific Rule Loading
+// ============================================================
+
+export interface LanguageRule {
+  id: string;
+  language: string;
+  pattern: RegExp;
+  message: string;
+  severity: 'error' | 'warning' | 'info';
+  category: string;
+}
+
+const LANGUAGE_RULES: Record<string, LanguageRule[]> = {
+  python: [
+    { id: 'py-mutable-default', language: 'python', pattern: /def\s+\w+\([^)]*=\s*(\[\]|\{\})/g, message: 'Mutable default argument (use None instead)', severity: 'error', category: 'correctness' },
+    { id: 'py-bare-except', language: 'python', pattern: /except\s*:/g, message: 'Bare except catches all exceptions including KeyboardInterrupt', severity: 'warning', category: 'correctness' },
+    { id: 'py-star-import', language: 'python', pattern: /from\s+\S+\s+import\s+\*/g, message: 'Wildcard import pollutes namespace', severity: 'warning', category: 'style' },
+    { id: 'py-global', language: 'python', pattern: /\bglobal\s+\w+/g, message: 'Global variable usage — consider passing as parameter', severity: 'warning', category: 'design' },
+    { id: 'py-print', language: 'python', pattern: /\bprint\s*\(/g, message: 'print() found — use logging module in production', severity: 'info', category: 'quality' },
+    { id: 'py-assert', language: 'python', pattern: /\bassert\s+/g, message: 'assert can be disabled with -O flag', severity: 'info', category: 'correctness' },
+  ],
+  go: [
+    { id: 'go-err-ignore', language: 'go', pattern: /\b\w+,\s*_\s*:?=\s*\w+\(/g, message: 'Error value discarded — check all errors', severity: 'error', category: 'correctness' },
+    { id: 'go-panic', language: 'go', pattern: /\bpanic\s*\(/g, message: 'panic() used — prefer returning errors', severity: 'warning', category: 'correctness' },
+    { id: 'go-init', language: 'go', pattern: /func\s+init\s*\(\s*\)/g, message: 'init() function — consider explicit initialization', severity: 'info', category: 'design' },
+    { id: 'go-fmt-print', language: 'go', pattern: /fmt\.Print(?:ln|f)?\s*\(/g, message: 'fmt.Print found — use structured logging', severity: 'info', category: 'quality' },
+  ],
+  rust: [
+    { id: 'rs-unwrap', language: 'rust', pattern: /\.unwrap\(\)/g, message: '.unwrap() can panic — use ? or match', severity: 'warning', category: 'correctness' },
+    { id: 'rs-unsafe', language: 'rust', pattern: /\bunsafe\s*\{/g, message: 'unsafe block — document safety invariants', severity: 'warning', category: 'safety' },
+    { id: 'rs-clone', language: 'rust', pattern: /\.clone\(\)/g, message: '.clone() may be unnecessary — consider borrowing', severity: 'info', category: 'performance' },
+    { id: 'rs-todo', language: 'rust', pattern: /todo!\(\)/g, message: 'todo!() macro — will panic at runtime', severity: 'error', category: 'completeness' },
+  ],
+  java: [
+    { id: 'java-sysout', language: 'java', pattern: /System\.out\.print(?:ln)?\s*\(/g, message: 'System.out.print — use logger', severity: 'info', category: 'quality' },
+    { id: 'java-catch-exception', language: 'java', pattern: /catch\s*\(\s*Exception\s+/g, message: 'Catching generic Exception — catch specific exceptions', severity: 'warning', category: 'correctness' },
+    { id: 'java-null-return', language: 'java', pattern: /return\s+null\s*;/g, message: 'Returning null — consider Optional', severity: 'warning', category: 'design' },
+    { id: 'java-string-concat', language: 'java', pattern: /"\s*\+\s*\w+\s*\+\s*"/g, message: 'String concatenation in loop-like context — use StringBuilder', severity: 'info', category: 'performance' },
+  ],
+  ruby: [
+    { id: 'rb-eval', language: 'ruby', pattern: /\beval\s*[("]/g, message: 'eval() — security risk', severity: 'error', category: 'security' },
+    { id: 'rb-rescue', language: 'ruby', pattern: /rescue\s*$/gm, message: 'Bare rescue catches all exceptions', severity: 'warning', category: 'correctness' },
+    { id: 'rb-puts', language: 'ruby', pattern: /\bputs\s+/g, message: 'puts found — use logger in production', severity: 'info', category: 'quality' },
+  ],
+  php: [
+    { id: 'php-eval', language: 'php', pattern: /\beval\s*\(/g, message: 'eval() — security risk', severity: 'error', category: 'security' },
+    { id: 'php-md5', language: 'php', pattern: /\bmd5\s*\(/g, message: 'MD5 for hashing — use password_hash() or bcrypt', severity: 'warning', category: 'security' },
+    { id: 'php-var-dump', language: 'php', pattern: /\bvar_dump\s*\(/g, message: 'var_dump() — remove before production', severity: 'info', category: 'quality' },
+    { id: 'php-sql-concat', language: 'php', pattern: /\$\w+\s*\.\s*["'](?:SELECT|INSERT|UPDATE|DELETE)/gi, message: 'SQL string concatenation — use prepared statements', severity: 'error', category: 'security' },
+  ],
+  typescript: [
+    { id: 'ts-any-cast', language: 'typescript', pattern: /as\s+any\b/g, message: 'Type assertion to any — loses type safety', severity: 'warning', category: 'type-safety' },
+    { id: 'ts-non-null', language: 'typescript', pattern: /\w+!/\./g, message: 'Non-null assertion (!) — prefer optional chaining', severity: 'info', category: 'safety' },
+    { id: 'ts-enum', language: 'typescript', pattern: /\benum\s+\w+/g, message: 'enum — consider const enum or union type for tree-shaking', severity: 'info', category: 'performance' },
+  ],
+  javascript: [
+    { id: 'js-var', language: 'javascript', pattern: /\bvar\s+\w+/g, message: 'var used — prefer const/let', severity: 'warning', category: 'style' },
+    { id: 'js-alert', language: 'javascript', pattern: /\balert\s*\(/g, message: 'alert() found — remove for production', severity: 'info', category: 'quality' },
+    { id: 'js-document-write', language: 'javascript', pattern: /document\.write\s*\(/g, message: 'document.write() — XSS risk and performance issue', severity: 'error', category: 'security' },
+  ],
+};
+
+export function getLanguageRules(langId: string): LanguageRule[] {
+  return LANGUAGE_RULES[langId] ?? [];
+}
+
+export function applyLanguageRules(code: string, langId: string): Array<{
+  line: number; message: string; severity: string; ruleId: string; category: string;
+}> {
+  const rules = getLanguageRules(langId);
+  const findings: Array<{ line: number; message: string; severity: string; ruleId: string; category: string }> = [];
+  const lines = code.split('\n');
+
+  for (const rule of rules) {
+    for (let i = 0; i < lines.length; i++) {
+      // Reset regex lastIndex for global patterns
+      rule.pattern.lastIndex = 0;
+      if (rule.pattern.test(lines[i])) {
+        findings.push({
+          line: i + 1,
+          message: rule.message,
+          severity: rule.severity,
+          ruleId: rule.id,
+          category: rule.category,
+        });
+      }
+    }
+  }
+
+  return findings.slice(0, 50);
+}
+
+// IDENTITY_SEAL: PART-7 | role=lang-rules | inputs=code,langId | outputs=findings
+
+// ============================================================
+// PART 8 — Polyglot Project Detection
+// ============================================================
+
+export interface PolyglotReport {
+  isPolyglot: boolean;
+  primaryLanguage: { lang: LanguageDef; fileCount: number; percentage: number } | null;
+  languages: Array<{ lang: LanguageDef; fileCount: number; percentage: number; lineCount: number }>;
+  crossLanguageDeps: Array<{ from: string; to: string; type: string }>;
+  recommendations: string[];
+  complexityScore: number;
+}
+
+export function detectPolyglotProject(rootPath: string): PolyglotReport {
+  const fs = require('fs');
+  const path = require('path');
+
+  const langCounts = new Map<string, { lang: LanguageDef; files: number; lines: number }>();
+  let totalFiles = 0;
+
+  function scan(dir: string, depth: number = 0): void {
+    if (depth > 8) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist' ||
+              entry.name === 'build' || entry.name === 'vendor' || entry.name === '__pycache__' ||
+              entry.name === 'target' || entry.name === '.git') continue;
+          scan(full, depth + 1);
+        } else if (entry.isFile()) {
+          const lang = detectLanguage(entry.name);
+          if (lang && !['json', 'yaml', 'toml', 'markdown'].includes(lang.id)) {
+            const existing = langCounts.get(lang.id) ?? { lang, files: 0, lines: 0 };
+            existing.files++;
+            try {
+              const content = fs.readFileSync(full, 'utf-8');
+              existing.lines += content.split('\n').length;
+            } catch { /* skip */ }
+            langCounts.set(lang.id, existing);
+            totalFiles++;
+          }
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  scan(rootPath);
+
+  const languages = [...langCounts.values()]
+    .map(v => ({
+      lang: v.lang,
+      fileCount: v.files,
+      percentage: totalFiles > 0 ? Math.round((v.files / totalFiles) * 100) : 0,
+      lineCount: v.lines,
+    }))
+    .sort((a, b) => b.fileCount - a.fileCount);
+
+  const isPolyglot = languages.filter(l => l.percentage >= 5).length >= 2;
+  const primaryLanguage = languages[0] ?? null;
+
+  // Detect cross-language dependencies
+  const crossDeps: Array<{ from: string; to: string; type: string }> = [];
+  const detectedLangs = new Set(languages.map(l => l.lang.id));
+
+  // Common cross-language patterns
+  if (detectedLangs.has('python') && detectedLangs.has('javascript')) {
+    crossDeps.push({ from: 'javascript', to: 'python', type: 'API call (REST/gRPC)' });
+  }
+  if (detectedLangs.has('typescript') && detectedLangs.has('rust')) {
+    crossDeps.push({ from: 'typescript', to: 'rust', type: 'WASM/NAPI binding' });
+  }
+  if (detectedLangs.has('java') && detectedLangs.has('kotlin')) {
+    crossDeps.push({ from: 'kotlin', to: 'java', type: 'JVM interop' });
+  }
+  if (detectedLangs.has('swift') && detectedLangs.has('objc')) {
+    crossDeps.push({ from: 'swift', to: 'objc', type: 'Bridging header' });
+  }
+  if (detectedLangs.has('c') && (detectedLangs.has('python') || detectedLangs.has('rust'))) {
+    crossDeps.push({ from: detectedLangs.has('python') ? 'python' : 'rust', to: 'c', type: 'FFI/ctypes' });
+  }
+
+  // Recommendations
+  const recommendations: string[] = [];
+  if (isPolyglot) {
+    recommendations.push('Consider a monorepo tool (Nx, Turborepo) for cross-language builds');
+    if (languages.length > 3) {
+      recommendations.push('High language diversity — ensure each language has dedicated linting and CI');
+    }
+    if (detectedLangs.has('javascript') && detectedLangs.has('typescript')) {
+      recommendations.push('Mixed JS/TS codebase — consider full TypeScript migration');
+    }
+  }
+
+  const complexityScore = Math.min(100, languages.length * 15 + crossDeps.length * 10);
+
+  return { isPolyglot, primaryLanguage, languages, crossLanguageDeps: crossDeps, recommendations, complexityScore };
+}
+
+// IDENTITY_SEAL: PART-8 | role=polyglot | inputs=rootPath | outputs=PolyglotReport
+
+// ============================================================
+// PART 9 — Mixed-Language File Analysis
+// ============================================================
+
+export interface MixedFileReport {
+  file: string;
+  primaryLanguage: string;
+  embeddedLanguages: Array<{ language: string; lineStart: number; lineEnd: number; snippet: string }>;
+  risk: 'low' | 'medium' | 'high';
+}
+
+export function analyzeMixedLanguageFiles(rootPath: string): MixedFileReport[] {
+  const fs = require('fs');
+  const path = require('path');
+
+  const reports: MixedFileReport[] = [];
+
+  // Patterns for detecting embedded languages
+  const EMBEDDED_PATTERNS: Array<{
+    host: string[];
+    detect: RegExp;
+    language: string;
+    endDetect?: RegExp;
+  }> = [
+    { host: ['typescript', 'javascript'], detect: /`(?:SELECT|INSERT|UPDATE|DELETE|CREATE)\s/i, language: 'SQL' },
+    { host: ['typescript', 'javascript'], detect: /innerHTML\s*=\s*`|<(?:div|span|p|h[1-6]|ul|ol|table|form)\b/i, language: 'HTML' },
+    { host: ['typescript', 'javascript'], detect: /css`|styled\.\w+`|style\s*=\s*\{/i, language: 'CSS' },
+    { host: ['typescript', 'javascript'], detect: /\bexec(?:Sync)?\s*\(\s*['"`](?:bash|sh|curl|grep|awk|sed|chmod|mkdir)\b/i, language: 'Shell' },
+    { host: ['python'], detect: /(?:execute|cursor\.execute)\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)/i, language: 'SQL' },
+    { host: ['python'], detect: /subprocess\.(?:run|call|Popen)\s*\(\s*\[?\s*['"](?:bash|sh|curl)/i, language: 'Shell' },
+    { host: ['php'], detect: /\$\w+->query\s*\(\s*['"](?:SELECT|INSERT|UPDATE|DELETE)/i, language: 'SQL' },
+    { host: ['ruby'], detect: /ActiveRecord::Base\.connection\.execute\s*\(\s*['"]|\.where\s*\(\s*['"]/i, language: 'SQL' },
+    { host: ['html'], detect: /<script\b/i, language: 'JavaScript' },
+    { host: ['html'], detect: /<style\b/i, language: 'CSS' },
+  ];
+
+  function scanFile(filePath: string): MixedFileReport | null {
+    const lang = detectLanguage(path.basename(filePath));
+    if (!lang) return null;
+
+    try {
+      const content = fs.readFileSync(filePath, 'utf-8');
+      const lines = content.split('\n');
+      const embedded: MixedFileReport['embeddedLanguages'] = [];
+
+      for (let i = 0; i < lines.length; i++) {
+        for (const pattern of EMBEDDED_PATTERNS) {
+          if (!pattern.host.includes(lang.id)) continue;
+          if (pattern.detect.test(lines[i])) {
+            embedded.push({
+              language: pattern.language,
+              lineStart: i + 1,
+              lineEnd: i + 1,
+              snippet: lines[i].trim().slice(0, 80),
+            });
+          }
+        }
+      }
+
+      if (embedded.length === 0) return null;
+
+      const risk = embedded.length > 10 ? 'high' : embedded.length > 3 ? 'medium' : 'low';
+      return {
+        file: path.relative(rootPath, filePath).replace(/\\/g, '/'),
+        primaryLanguage: lang.id,
+        embeddedLanguages: embedded.slice(0, 20),
+        risk,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  function scanDir(dir: string, depth: number = 0): void {
+    if (depth > 6) return;
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name.startsWith('.') || entry.name === 'node_modules' || entry.name === 'dist') continue;
+          scanDir(full, depth + 1);
+        } else if (entry.isFile()) {
+          const report = scanFile(full);
+          if (report) reports.push(report);
+        }
+      }
+    } catch { /* skip */ }
+  }
+
+  scanDir(rootPath);
+  return reports.sort((a, b) => b.embeddedLanguages.length - a.embeddedLanguages.length).slice(0, 30);
+}
+
+// IDENTITY_SEAL: PART-9 | role=mixed-lang | inputs=rootPath | outputs=MixedFileReport[]

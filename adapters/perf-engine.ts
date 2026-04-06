@@ -107,23 +107,75 @@ export async function runC8(command: string, rootPath: string) {
 // ============================================================
 
 export async function measureMemoryGrowth(fn: () => Promise<void>, iterations: number = 100) {
-  const snapshots: Array<{ iteration: number; heapUsedMB: number }> = [];
+  const snapshots: Array<{ iteration: number; heapUsedMB: number; rss: number }> = [];
 
+  // Phase 1: Warm-up (stabilize JIT, caches)
+  for (let i = 0; i < Math.min(10, Math.floor(iterations * 0.1)); i++) {
+    await fn();
+  }
+  if (globalThis.gc) globalThis.gc();
+  await new Promise(r => setTimeout(r, 50));
+
+  // Phase 2: Measure with frequent snapshots
+  const snapshotInterval = Math.max(1, Math.floor(iterations / 20));
   for (let i = 0; i < iterations; i++) {
     await fn();
-    if (i % 10 === 0 || i === iterations - 1) {
+    if (i % snapshotInterval === 0 || i === iterations - 1) {
       if (globalThis.gc) globalThis.gc();
       const mem = process.memoryUsage();
-      snapshots.push({ iteration: i, heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024 * 10) / 10 });
+      snapshots.push({
+        iteration: i,
+        heapUsedMB: Math.round(mem.heapUsed / 1024 / 1024 * 100) / 100,
+        rss: Math.round(mem.rss / 1024 / 1024 * 100) / 100,
+      });
     }
   }
 
   const first = snapshots[0]?.heapUsedMB ?? 0;
   const last = snapshots[snapshots.length - 1]?.heapUsedMB ?? 0;
   const growth = last - first;
-  const leakSuspected = growth > 10; // >10MB growth = suspicious
 
-  return { snapshots, growth, leakSuspected, firstMB: first, lastMB: last };
+  // Linear regression on snapshots to compute growth rate (MB per iteration)
+  const n = snapshots.length;
+  let sumX = 0, sumY = 0, sumXY = 0, sumXX = 0;
+  for (const s of snapshots) {
+    sumX += s.iteration;
+    sumY += s.heapUsedMB;
+    sumXY += s.iteration * s.heapUsedMB;
+    sumXX += s.iteration * s.iteration;
+  }
+  const slope = n > 1 ? (n * sumXY - sumX * sumY) / (n * sumXX - sumX * sumX) : 0;
+  const growthRateMBPerIter = Math.round(slope * 10000) / 10000;
+
+  // Monotonic growth check: how many consecutive increases?
+  let maxConsecutiveRise = 0;
+  let currentRise = 0;
+  for (let i = 1; i < snapshots.length; i++) {
+    if (snapshots[i].heapUsedMB > snapshots[i - 1].heapUsedMB + 0.05) {
+      currentRise++;
+      maxConsecutiveRise = Math.max(maxConsecutiveRise, currentRise);
+    } else {
+      currentRise = 0;
+    }
+  }
+
+  // Leak detection: positive slope + sustained growth pattern (not just a spike)
+  const leakSuspected = (
+    growthRateMBPerIter > 0.01 &&
+    maxConsecutiveRise >= Math.floor(snapshots.length * 0.4)
+  ) || growth > 50;
+
+  const leakConfidence = growthRateMBPerIter <= 0 ? 'none'
+    : growthRateMBPerIter < 0.01 ? 'low'
+    : growthRateMBPerIter < 0.05 ? 'medium'
+    : 'high';
+
+  return {
+    snapshots, growth: Math.round(growth * 100) / 100,
+    leakSuspected, leakConfidence,
+    growthRateMBPerIter, maxConsecutiveRise,
+    firstMB: first, lastMB: last,
+  };
 }
 
 // IDENTITY_SEAL: PART-4 | role=memory-measure | inputs=fn,iterations | outputs=snapshots
@@ -142,6 +194,65 @@ export async function runFullPerfAnalysis(rootPath: string) {
     results.push({ engine: 'c8', score, detail: `lines ${coverage.lines}% branches ${coverage.branches}%` });
   } catch {
     results.push({ engine: 'c8', score: 0, detail: 'no tests' });
+  }
+
+  // Tinybench — micro-benchmark critical paths if entry file exists
+  try {
+    const { existsSync, readFileSync } = require('fs');
+    const { join, resolve } = require('path');
+    const pkgPath = join(rootPath, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      const mainFile = pkg.main || pkg.module || 'index.js';
+      const mainPath = resolve(rootPath, mainFile);
+
+      if (existsSync(mainPath)) {
+        // Benchmark require/import time of the main module
+        const benchmarks = [
+          {
+            name: `require(${mainFile})`,
+            fn: () => {
+              try {
+                delete require.cache[require.resolve(mainPath)];
+                require(mainPath);
+              } catch { /* module may not be loadable outside its context */ }
+            },
+          },
+          {
+            name: 'JSON.parse(package.json)',
+            fn: () => { JSON.parse(readFileSync(pkgPath, 'utf-8')); },
+          },
+        ];
+        const benchResult = await runTinybench(benchmarks);
+        const avgOps = benchResult.reduce((s, r) => s + r.opsPerSec, 0) / benchResult.length;
+        const score = avgOps > 10000 ? 100 : avgOps > 1000 ? 80 : avgOps > 100 ? 60 : 40;
+        const detail = benchResult.map(b => `${b.name}: ${b.opsPerSec} ops/s`).join(', ');
+        results.push({ engine: 'tinybench', score, detail });
+      }
+    }
+  } catch {
+    results.push({ engine: 'tinybench', score: 0, detail: 'not available' });
+  }
+
+  // Memory leak detection
+  try {
+    const memResult = await measureMemoryGrowth(async () => {
+      // Simulate typical app iteration: read pkg, parse, discard
+      const { readFileSync, existsSync } = require('fs');
+      const { join } = require('path');
+      const p = join(rootPath, 'package.json');
+      if (existsSync(p)) { JSON.parse(readFileSync(p, 'utf-8')); }
+    }, 50);
+    const score = memResult.leakConfidence === 'none' ? 100
+      : memResult.leakConfidence === 'low' ? 85
+      : memResult.leakConfidence === 'medium' ? 60 : 30;
+    results.push({
+      engine: 'memory-leak',
+      score,
+      detail: `growth ${memResult.growth}MB, rate ${memResult.growthRateMBPerIter}MB/iter, confidence ${memResult.leakConfidence}`,
+    });
+  } catch {
+    results.push({ engine: 'memory-leak', score: 50, detail: 'measurement failed' });
   }
 
   const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 0;

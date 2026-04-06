@@ -5,9 +5,9 @@
 // 프로젝트 내 파일/코드 초고속 검색.
 // fzf = 퍼지 파일 검색, ripgrep = 코드 내용 검색.
 
-import { execSync } from 'child_process';
-import { readdirSync, statSync } from 'fs';
-import { join, relative, extname } from 'path';
+const { execSync } = require('child_process');
+const { readdirSync, readFileSync, statSync } = require('fs');
+const { join, relative, extname } = require('path');
 
 // ============================================================
 // PART 1 — Ripgrep Integration (코드 내용 검색)
@@ -19,6 +19,9 @@ export interface SearchResult {
   column: number;
   content: string;
   matchLength: number;
+  contextBefore?: string[];
+  contextAfter?: string[];
+  relevanceScore?: number;
 }
 
 export function ripgrepSearch(query: string, rootPath: string, opts?: {
@@ -26,39 +29,108 @@ export function ripgrepSearch(query: string, rootPath: string, opts?: {
   maxResults?: number;
   caseSensitive?: boolean;
   regex?: boolean;
+  contextLines?: number;
 }): SearchResult[] {
   const maxResults = opts?.maxResults ?? 50;
+  const contextLines = opts?.contextLines ?? 0;
   const caseFlag = opts?.caseSensitive ? '' : '-i';
   const globFlag = opts?.glob ? `--glob "${opts.glob}"` : '--glob "*.{ts,tsx,js,jsx,py,go,rs,java,rb,php}"';
   const regexFlag = opts?.regex ? '' : '--fixed-strings';
+  const contextFlag = contextLines > 0 ? `--context ${contextLines}` : '';
 
   try {
     const output = execSync(
-      `rg ${caseFlag} ${regexFlag} ${globFlag} --json --max-count ${maxResults} -- "${query.replace(/["\\`$]/g, '\\$&')}" "${rootPath}"`,
+      `rg ${caseFlag} ${regexFlag} ${globFlag} ${contextFlag} --json --max-count ${maxResults} -- "${query.replace(/["\\`$]/g, '\\$&')}" "${rootPath}"`,
       { encoding: 'utf-8', timeout: 10000, maxBuffer: 5 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] },
     );
 
     const results: SearchResult[] = [];
-    for (const line of output.split('\n').filter(Boolean)) {
+    const contextMap: Map<number, { before: string[]; after: string[] }> = new Map();
+    let currentMatchIdx = -1;
+
+    const lines = output.split('\n').filter(Boolean);
+    for (const line of lines) {
       try {
         const data = JSON.parse(line);
         if (data.type === 'match') {
+          currentMatchIdx = results.length;
+          const matchContent = data.data.lines?.text?.trim()?.slice(0, 200) ?? '';
           results.push({
             file: relative(rootPath, data.data.path.text),
             line: data.data.line_number,
             column: data.data.submatches?.[0]?.start ?? 0,
-            content: data.data.lines?.text?.trim()?.slice(0, 200) ?? '',
+            content: matchContent,
             matchLength: data.data.submatches?.[0]?.end - data.data.submatches?.[0]?.start ?? 0,
+            contextBefore: [],
+            contextAfter: [],
           });
+          contextMap.set(currentMatchIdx, { before: [], after: [] });
+        } else if (data.type === 'context' && currentMatchIdx >= 0) {
+          const ctx = contextMap.get(currentMatchIdx);
+          if (ctx) {
+            const text = data.data.lines?.text?.trim()?.slice(0, 200) ?? '';
+            if (data.data.line_number < results[currentMatchIdx].line) {
+              ctx.before.push(text);
+            } else {
+              ctx.after.push(text);
+            }
+          }
         }
       } catch { /* skip malformed */ }
     }
 
-    return results;
+    // Apply context to results
+    for (const [idx, ctx] of contextMap) {
+      results[idx].contextBefore = ctx.before;
+      results[idx].contextAfter = ctx.after;
+    }
+
+    // Score by relevance
+    return rankSearchResults(results, query);
   } catch {
     // Fallback: native grep
     return grepFallback(query, rootPath, maxResults);
   }
+}
+
+/** Rank search results by relevance */
+function rankSearchResults(results: SearchResult[], query: string): SearchResult[] {
+  const queryLower = query.toLowerCase();
+
+  for (const r of results) {
+    let score = 10; // base score
+
+    const contentLower = r.content.toLowerCase();
+    const fileLower = r.file.toLowerCase();
+
+    // Exact match bonus
+    if (contentLower.includes(queryLower)) score += 20;
+
+    // Whole word match bonus
+    const wordBoundary = new RegExp(`\\b${query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i');
+    if (wordBoundary.test(r.content)) score += 15;
+
+    // Filename match bonus
+    if (fileLower.includes(queryLower)) score += 25;
+
+    // Source file priority (not test/spec/mock)
+    if (/\.(test|spec|mock|stub|fixture)\./i.test(r.file)) score -= 5;
+    else score += 5;
+
+    // Definition-like patterns (function/class/const declarations)
+    if (/(?:function|class|const|let|var|export|interface|type)\s/.test(r.content)) score += 10;
+
+    // Import/require patterns are lower relevance
+    if (/(?:import|require)\s/.test(r.content)) score -= 5;
+
+    // Shallower file paths are more relevant
+    const depth = (r.file.match(/[/\\]/g) || []).length;
+    score -= depth * 2;
+
+    r.relevanceScore = Math.max(0, score);
+  }
+
+  return results.sort((a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0));
 }
 
 function grepFallback(query: string, rootPath: string, maxResults: number): SearchResult[] {
@@ -237,3 +309,92 @@ export function symbolSearch(query: string, rootPath: string, maxResults: number
 }
 
 // IDENTITY_SEAL: PART-3 | role=symbol-search | inputs=query,rootPath | outputs=SymbolResult[]
+
+// ============================================================
+// PART 4 — Context Lines Display
+// ============================================================
+
+export interface SearchResultWithContext extends SearchResult {
+  contextDisplay: string;
+}
+
+export function getResultWithContext(result: SearchResult, rootPath: string, contextLines: number = 3): SearchResultWithContext {
+  const fullPath = join(rootPath, result.file);
+  let before: string[] = [];
+  let after: string[] = [];
+
+  try {
+    const content = readFileSync(fullPath, 'utf-8');
+    const lines = content.split('\n');
+    const lineIdx = result.line - 1;
+
+    const startLine = Math.max(0, lineIdx - contextLines);
+    const endLine = Math.min(lines.length - 1, lineIdx + contextLines);
+
+    before = lines.slice(startLine, lineIdx);
+    after = lines.slice(lineIdx + 1, endLine + 1);
+  } catch { /* file not readable */ }
+
+  const pad = String(result.line + contextLines).length;
+  const contextDisplay = [
+    ...before.map((l, i) => `  ${String(result.line - before.length + i).padStart(pad)} | ${l}`),
+    `> ${String(result.line).padStart(pad)} | ${result.content}`,
+    ...after.map((l, i) => `  ${String(result.line + 1 + i).padStart(pad)} | ${l}`),
+  ].join('\n');
+
+  return { ...result, contextBefore: before, contextAfter: after, contextDisplay };
+}
+
+// IDENTITY_SEAL: PART-4 | role=context-display | inputs=result,rootPath | outputs=SearchResultWithContext
+
+// ============================================================
+// PART 5 — Unified Search Runner
+// ============================================================
+
+export function runFullSearch(query: string, rootPath: string, opts?: {
+  mode?: 'code' | 'file' | 'symbol' | 'all';
+  maxResults?: number;
+  contextLines?: number;
+}) {
+  const mode = opts?.mode ?? 'all';
+  const maxResults = opts?.maxResults ?? 20;
+  const contextLines = opts?.contextLines ?? 2;
+
+  const output: {
+    code?: SearchResult[];
+    files?: FuzzyResult[];
+    symbols?: SymbolResult[];
+    totalResults: number;
+    bestMatch?: SearchResultWithContext;
+  } = { totalResults: 0 };
+
+  // Code search
+  if (mode === 'code' || mode === 'all') {
+    const codeResults = ripgrepSearch(query, rootPath, { maxResults, contextLines });
+    output.code = codeResults;
+    output.totalResults += codeResults.length;
+
+    // Best match with full context
+    if (codeResults.length > 0) {
+      output.bestMatch = getResultWithContext(codeResults[0], rootPath, contextLines);
+    }
+  }
+
+  // File search
+  if (mode === 'file' || mode === 'all') {
+    const fileResults = fuzzyFileSearch(query, rootPath, maxResults);
+    output.files = fileResults;
+    output.totalResults += fileResults.length;
+  }
+
+  // Symbol search
+  if (mode === 'symbol' || mode === 'all') {
+    const symbolResults = symbolSearch(query, rootPath, maxResults);
+    output.symbols = symbolResults;
+    output.totalResults += symbolResults.length;
+  }
+
+  return output;
+}
+
+// IDENTITY_SEAL: PART-5 | role=unified-search | inputs=query,rootPath | outputs=results

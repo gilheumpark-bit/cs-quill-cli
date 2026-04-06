@@ -64,38 +64,83 @@ export async function runPlayground(opts: PlaygroundOptions): Promise<void> {
   }
   countSrc(join(process.cwd(), 'src'));
 
-  const astScore = Math.min(100, Math.round(70 + (totalFiles > 10 ? 15 : 0) + (totalFunctions > 30 ? 15 : 0)));
-  categories.push({ name: 'AST', icon: '🔬', score: astScore, engines: 6, duration: Math.round(performance.now() - astStart) });
-  console.log(`        → ${astScore}/100 (${totalFiles} files, ${totalFunctions} functions) ${categories[0].duration}ms`);
-
-  // Phase 2: Quality Score (8-team pipeline)
-  console.log('  [Phase 2] Quality 엔진...');
-  const qualStart = performance.now();
-  // Run pipeline on a sample of files
-  const { runStaticPipeline } = require('../core/pipeline-bridge');
-  let qualScoreSum = 0;
-  let qualCount = 0;
-  function sampleVerify(dir: string, limit: number): void {
-    if (qualCount >= limit) return;
+  // Run actual pipeline on a sample of source files to get real AST score
+  let astPipelineScoreSum = 0;
+  let astPipelineCount = 0;
+  const { runStaticPipeline: runAstPipeline } = require('../core/pipeline-bridge');
+  function sampleAST(dir: string, limit: number): void {
+    if (astPipelineCount >= limit) return;
     try {
       const entries = readdirSync(dir, { withFileTypes: true });
       for (const e of entries) {
-        if (qualCount >= limit) return;
+        if (astPipelineCount >= limit) return;
         if (e.name === 'node_modules' || e.name === '.next' || e.name.startsWith('.')) continue;
         const p = join(dir, e.name);
-        if (e.isDirectory()) { sampleVerify(p, limit); continue; }
+        if (e.isDirectory()) { sampleAST(p, limit); continue; }
         if (!/\.(ts|tsx)$/.test(e.name)) continue;
         try {
           const code = readFileSync(p, 'utf-8');
           if (code.length < 50) continue;
-          const result = await runStaticPipeline(code, 'typescript');
-          qualScoreSum += result.overallScore;
-          qualCount++;
+          const result = runAstPipeline(code, 'typescript');
+          // Extract AST team score specifically
+          const astTeam = result.teams?.find((t: any) => t.name === 'ast');
+          if (astTeam) {
+            astPipelineScoreSum += astTeam.score;
+          } else {
+            astPipelineScoreSum += result.score;
+          }
+          astPipelineCount++;
         } catch { /* skip */ }
       }
     } catch { /* skip */ }
   }
-  sampleVerify(join(process.cwd(), 'src'), 30);
+  sampleAST(join(process.cwd(), 'src'), 20);
+  // Derive AST score from real pipeline data, fallback to complexity-based heuristic
+  const astScore = astPipelineCount > 0
+    ? Math.round(astPipelineScoreSum / astPipelineCount)
+    : Math.min(100, Math.round(
+        40
+        + Math.min(25, Math.round((totalFiles / 30) * 25))
+        + Math.min(20, Math.round((totalFunctions / 60) * 20))
+        + (totalFunctions > 0 && totalFiles > 0 ? Math.min(15, Math.round((totalFunctions / totalFiles) * 3)) : 0)
+      ));
+  categories.push({ name: 'AST', icon: '🔬', score: astScore, engines: 6, duration: Math.round(performance.now() - astStart) });
+  console.log(`        → ${astScore}/100 (${totalFiles} files, ${totalFunctions} functions, ${astPipelineCount} sampled) ${categories[0].duration}ms`);
+
+  // Phase 2: Quality Score (8-team pipeline)
+  console.log('  [Phase 2] Quality 엔진...');
+  const qualStart = performance.now();
+  // Run real pipeline on a sample of files for quality scoring
+  const { runStaticPipeline } = require('../core/pipeline-bridge');
+  let qualScoreSum = 0;
+  let qualCount = 0;
+  const qualFileQueue: string[] = [];
+  function collectQualFiles(dir: string, limit: number): void {
+    if (qualFileQueue.length >= limit) return;
+    try {
+      const entries = readdirSync(dir, { withFileTypes: true });
+      for (const e of entries) {
+        if (qualFileQueue.length >= limit) return;
+        if (e.name === 'node_modules' || e.name === '.next' || e.name.startsWith('.')) continue;
+        const p = join(dir, e.name);
+        if (e.isDirectory()) { collectQualFiles(p, limit); continue; }
+        if (!/\.(ts|tsx)$/.test(e.name)) continue;
+        qualFileQueue.push(p);
+      }
+    } catch { /* skip */ }
+  }
+  collectQualFiles(join(process.cwd(), 'src'), 30);
+  // Run pipeline on each collected file (await-safe)
+  for (const filePath of qualFileQueue) {
+    try {
+      const code = readFileSync(filePath, 'utf-8');
+      if (code.length < 50) continue;
+      const result = await runStaticPipeline(code, 'typescript');
+      // Use pipeline score (weighted avg of all 8 teams)
+      qualScoreSum += result.score;
+      qualCount++;
+    } catch { /* skip */ }
+  }
   const qualityScore = qualCount > 0 ? Math.round(qualScoreSum / qualCount) : 50;
   categories.push({ name: 'Quality', icon: '🎯', score: qualityScore, engines: 6, duration: Math.round(performance.now() - qualStart) });
   console.log(`        → ${qualityScore}/100 (${qualCount} files sampled) ${categories[1].duration}ms`);

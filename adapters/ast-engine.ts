@@ -350,3 +350,274 @@ async function analyzeWithEsquery(code: string) {
 }
 
 // IDENTITY_SEAL: PART-5 | role=unified-runner | inputs=code,fileName | outputs=findings
+
+// ============================================================
+// PART 6 — Advanced AST Metrics (함수 길이, 중첩, 커플링, 응집도)
+// ============================================================
+
+export interface ASTMetrics {
+  avgFunctionLength: number;
+  maxFunctionLength: number;
+  maxNestingDepth: number;
+  totalFunctions: number;
+  longFunctions: Array<{ name: string; line: number; length: number }>;
+  deeplyNested: Array<{ line: number; depth: number; context: string }>;
+  couplingScore: number;
+  cohesionScore: number;
+  imports: { internal: number; external: number; total: number };
+  exports: { named: number; default: number; total: number };
+  moduleDetails: {
+    incomingRefs: string[];
+    outgoingRefs: string[];
+    unusedExports: string[];
+  };
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+}
+
+export async function computeASTMetrics(code: string, fileName: string = 'temp.ts'): Promise<ASTMetrics> {
+  const ts = require('typescript');
+  const sourceFile = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
+
+  const functions: Array<{ name: string; line: number; length: number; bodyStart: number; bodyEnd: number }> = [];
+  const importModules: string[] = [];
+  const exportNames: string[] = [];
+  let hasDefaultExport = false;
+  const usedIdentifiers = new Set<string>();
+  const declaredIdentifiers = new Set<string>();
+
+  // ── Pass 1: Collect functions, imports, exports ──
+
+  function collectInfo(node: any): void {
+    const lineOf = (n: any) => sourceFile.getLineAndCharacterOfPosition(n.getStart()).line + 1;
+    const endLineOf = (n: any) => sourceFile.getLineAndCharacterOfPosition(n.getEnd()).line + 1;
+
+    // Functions
+    if (ts.isFunctionDeclaration(node) || ts.isMethodDeclaration(node) ||
+        ts.isArrowFunction(node) || ts.isFunctionExpression(node)) {
+      const name = node.name?.getText?.(sourceFile) ?? 'anonymous';
+      const body = node.body;
+      if (body) {
+        const startLine = lineOf(node);
+        const endLine = endLineOf(node);
+        const length = endLine - startLine + 1;
+        functions.push({ name, line: startLine, length, bodyStart: startLine, bodyEnd: endLine });
+      }
+    }
+
+    // Imports
+    if (ts.isImportDeclaration(node)) {
+      const moduleSpec = node.moduleSpecifier?.getText?.(sourceFile)?.replace(/['"]/g, '') ?? '';
+      importModules.push(moduleSpec);
+    }
+
+    // Exports
+    if (ts.isExportDeclaration(node) || (node.modifiers && node.modifiers.some((m: any) => m.kind === ts.SyntaxKind.ExportKeyword))) {
+      const name = node.name?.getText?.(sourceFile);
+      if (name) exportNames.push(name);
+      if (node.modifiers?.some((m: any) => m.kind === ts.SyntaxKind.DefaultKeyword)) {
+        hasDefaultExport = true;
+      }
+    }
+
+    // Track identifiers for cohesion analysis
+    if (ts.isIdentifier(node)) {
+      const text = node.getText(sourceFile);
+      if (ts.isVariableDeclaration(node.parent) || ts.isFunctionDeclaration(node.parent) ||
+          ts.isParameter(node.parent) || ts.isClassDeclaration(node.parent)) {
+        declaredIdentifiers.add(text);
+      } else {
+        usedIdentifiers.add(text);
+      }
+    }
+
+    ts.forEachChild(node, collectInfo);
+  }
+
+  collectInfo(sourceFile);
+
+  // ── Pass 2: Nesting depth analysis ──
+
+  const deepNested: Array<{ line: number; depth: number; context: string }> = [];
+
+  function measureNesting(node: any, depth: number, context: string): number {
+    const lineOf = (n: any) => sourceFile.getLineAndCharacterOfPosition(n.getStart()).line + 1;
+
+    const nestTypes = [
+      ts.SyntaxKind.IfStatement, ts.SyntaxKind.ForStatement, ts.SyntaxKind.ForInStatement,
+      ts.SyntaxKind.ForOfStatement, ts.SyntaxKind.WhileStatement, ts.SyntaxKind.DoStatement,
+      ts.SyntaxKind.SwitchStatement, ts.SyntaxKind.TryStatement, ts.SyntaxKind.ConditionalExpression,
+    ];
+
+    let isNestingNode = nestTypes.includes(node.kind);
+    let newDepth = depth;
+    let newContext = context;
+
+    if (isNestingNode) {
+      newDepth = depth + 1;
+      const kindName = ts.SyntaxKind[node.kind] ?? 'block';
+      newContext = `${context} > ${kindName}`;
+
+      if (newDepth >= 4) {
+        deepNested.push({ line: lineOf(node), depth: newDepth, context: newContext.trim() });
+      }
+    }
+
+    let maxChildDepth = newDepth;
+    ts.forEachChild(node, (child: any) => {
+      const childMax = measureNesting(child, newDepth, newContext);
+      if (childMax > maxChildDepth) maxChildDepth = childMax;
+    });
+
+    return maxChildDepth;
+  }
+
+  const maxNestingDepth = measureNesting(sourceFile, 0, '');
+
+  // ── Compute metrics ──
+
+  const totalFunctions = functions.length;
+  const avgFunctionLength = totalFunctions > 0
+    ? Math.round(functions.reduce((s, f) => s + f.length, 0) / totalFunctions)
+    : 0;
+  const maxFunctionLength = totalFunctions > 0
+    ? Math.max(...functions.map(f => f.length))
+    : 0;
+
+  const longFunctions = functions
+    .filter(f => f.length > 40)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 10)
+    .map(f => ({ name: f.name, line: f.line, length: f.length }));
+
+  // Coupling: ratio of external imports to total imports
+  const internalImports = importModules.filter(m => m.startsWith('.'));
+  const externalImports = importModules.filter(m => !m.startsWith('.'));
+  const totalImports = importModules.length;
+
+  // High coupling = many external dependencies relative to module size
+  const couplingRaw = totalImports > 0
+    ? (externalImports.length / Math.max(totalFunctions, 1))
+    : 0;
+  const couplingScore = Math.max(0, Math.min(100, Math.round(100 - couplingRaw * 20)));
+
+  // Cohesion: how many declared identifiers are actually used internally
+  // High cohesion = most declarations are used within the module
+  const sharedIdentifiers = [...declaredIdentifiers].filter(id => usedIdentifiers.has(id));
+  const cohesionRaw = declaredIdentifiers.size > 0
+    ? sharedIdentifiers.length / declaredIdentifiers.size
+    : 1;
+  const cohesionScore = Math.round(cohesionRaw * 100);
+
+  // Grade
+  const composite = (couplingScore * 0.3 + cohesionScore * 0.3 +
+    Math.max(0, 100 - longFunctions.length * 15) * 0.2 +
+    Math.max(0, 100 - maxNestingDepth * 10) * 0.2);
+  const grade = composite >= 85 ? 'A' : composite >= 70 ? 'B' : composite >= 55 ? 'C' : composite >= 40 ? 'D' : 'F';
+
+  return {
+    avgFunctionLength,
+    maxFunctionLength,
+    maxNestingDepth,
+    totalFunctions,
+    longFunctions,
+    deeplyNested: deepNested.slice(0, 10),
+    couplingScore,
+    cohesionScore,
+    imports: { internal: internalImports.length, external: externalImports.length, total: totalImports },
+    exports: { named: exportNames.length, default: hasDefaultExport ? 1 : 0, total: exportNames.length + (hasDefaultExport ? 1 : 0) },
+    moduleDetails: {
+      incomingRefs: [], // Requires cross-file analysis
+      outgoingRefs: importModules.slice(0, 20),
+      unusedExports: [], // Requires cross-file analysis
+    },
+    grade,
+  };
+}
+
+// IDENTITY_SEAL: PART-6 | role=ast-metrics | inputs=code,fileName | outputs=ASTMetrics
+
+// ============================================================
+// PART 7 — Multi-File Coupling Analysis
+// ============================================================
+
+export async function analyzeModuleCoupling(rootPath: string): Promise<{
+  modules: Array<{ file: string; imports: number; importedBy: number; couplingScore: number }>;
+  mostCoupled: string[];
+  leastCoupled: string[];
+  avgCoupling: number;
+}> {
+  const fs = require('fs');
+  const path = require('path');
+
+  const importGraph = new Map<string, Set<string>>(); // file -> set of imported files
+  const importedByGraph = new Map<string, Set<string>>(); // file -> set of files that import it
+
+  function collectFiles(dir: string): string[] {
+    const results: string[] = [];
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const full = path.join(dir, entry.name);
+        if (entry.isDirectory() && !entry.name.startsWith('.') && entry.name !== 'node_modules' && entry.name !== 'dist') {
+          results.push(...collectFiles(full));
+        } else if (entry.isFile() && /\.(ts|tsx|js|jsx)$/.test(entry.name)) {
+          results.push(full);
+        }
+      }
+    } catch { /* skip */ }
+    return results;
+  }
+
+  const files = collectFiles(rootPath);
+
+  for (const file of files) {
+    const rel = path.relative(rootPath, file).replace(/\\/g, '/');
+    const imports = new Set<string>();
+
+    try {
+      const content = fs.readFileSync(file, 'utf-8');
+      const importRe = /(?:import\s+.*?from\s+['"]([^'"]+)['"]|require\s*\(\s*['"]([^'"]+)['"]\s*\))/g;
+      let m;
+      while ((m = importRe.exec(content)) !== null) {
+        const mod = m[1] ?? m[2];
+        if (mod.startsWith('.')) {
+          const resolved = path.relative(rootPath, path.resolve(path.dirname(file), mod)).replace(/\\/g, '/');
+          imports.add(resolved);
+
+          const existing = importedByGraph.get(resolved) ?? new Set();
+          existing.add(rel);
+          importedByGraph.set(resolved, existing);
+        }
+      }
+    } catch { /* skip */ }
+
+    importGraph.set(rel, imports);
+  }
+
+  const modules = [...importGraph.entries()].map(([file, imports]) => {
+    const importedBy = importedByGraph.get(file.replace(/\.(ts|tsx|js|jsx)$/, ''))?.size ?? 0;
+    const altKey = file.replace(/\/index\.(ts|tsx|js|jsx)$/, '');
+    const importedByAlt = importedByGraph.get(altKey)?.size ?? 0;
+    const totalImportedBy = importedBy + importedByAlt;
+
+    return {
+      file,
+      imports: imports.size,
+      importedBy: totalImportedBy,
+      couplingScore: imports.size + totalImportedBy,
+    };
+  }).sort((a, b) => b.couplingScore - a.couplingScore);
+
+  const avgCoupling = modules.length > 0
+    ? Math.round(modules.reduce((s, m) => s + m.couplingScore, 0) / modules.length)
+    : 0;
+
+  return {
+    modules: modules.slice(0, 30),
+    mostCoupled: modules.slice(0, 5).map(m => m.file),
+    leastCoupled: modules.filter(m => m.couplingScore === 0).map(m => m.file).slice(0, 5),
+    avgCoupling,
+  };
+}
+
+// IDENTITY_SEAL: PART-7 | role=module-coupling | inputs=rootPath | outputs=couplingAnalysis

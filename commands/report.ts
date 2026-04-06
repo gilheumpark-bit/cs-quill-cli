@@ -95,6 +95,76 @@ export async function runReport(opts: ReportOptions): Promise<void> {
     console.log(`\n  💡 개선 포인트: ${sorted[0].name} (${sorted[0].avg}/100) 이 가장 낮습니다.`);
   }
 
+  // ── Trend Analysis ──
+  if (receipts.length >= 2) {
+    console.log('\n  📈 트렌드 분석:');
+
+    // Split into recent half vs older half for comparison
+    const midpoint = Math.floor(receipts.length / 2);
+    const recentHalf = receipts.slice(0, midpoint);
+    const olderHalf = receipts.slice(midpoint);
+
+    const recentAvg = Math.round(recentHalf.reduce((s, r) => s + r.pipeline.overallScore, 0) / recentHalf.length);
+    const olderAvg = Math.round(olderHalf.reduce((s, r) => s + r.pipeline.overallScore, 0) / olderHalf.length);
+    const diff = recentAvg - olderAvg;
+    const arrow = diff > 0 ? '↑' : diff < 0 ? '↓' : '→';
+    const diffLabel = diff > 0 ? `+${diff}` : `${diff}`;
+    console.log(`     전체 점수: ${olderAvg} → ${recentAvg} ${arrow} (${diffLabel})`);
+
+    // Rolling average (window of 3)
+    const windowSize = Math.min(3, receipts.length);
+    const rollingScores: number[] = [];
+    for (let i = 0; i <= receipts.length - windowSize; i++) {
+      const window = receipts.slice(i, i + windowSize);
+      rollingScores.push(Math.round(window.reduce((s, r) => s + r.pipeline.overallScore, 0) / windowSize));
+    }
+    if (rollingScores.length >= 2) {
+      const latestRolling = rollingScores[0];
+      const prevRolling = rollingScores[1];
+      const rollingDiff = latestRolling - prevRolling;
+      const rollingArrow = rollingDiff > 0 ? '↑' : rollingDiff < 0 ? '↓' : '→';
+      console.log(`     이동평균(${windowSize}): ${latestRolling}/100 ${rollingArrow}`);
+    }
+
+    // Per-team trend
+    const teamTrends = new Map<string, { recent: number[]; older: number[] }>();
+    for (const r of recentHalf) {
+      for (const t of r.pipeline.teams) {
+        const entry = teamTrends.get(t.name) ?? { recent: [], older: [] };
+        entry.recent.push(t.score);
+        teamTrends.set(t.name, entry);
+      }
+    }
+    for (const r of olderHalf) {
+      for (const t of r.pipeline.teams) {
+        const entry = teamTrends.get(t.name) ?? { recent: [], older: [] };
+        entry.older.push(t.score);
+        teamTrends.set(t.name, entry);
+      }
+    }
+
+    const trendLines: string[] = [];
+    for (const [name, data] of teamTrends) {
+      if (data.recent.length === 0 || data.older.length === 0) continue;
+      const rAvg = Math.round(data.recent.reduce((a, b) => a + b, 0) / data.recent.length);
+      const oAvg = Math.round(data.older.reduce((a, b) => a + b, 0) / data.older.length);
+      const d = rAvg - oAvg;
+      const a = d > 0 ? '↑' : d < 0 ? '↓' : '→';
+      trendLines.push(`     ${a} ${name.padEnd(14)} ${oAvg} → ${rAvg}`);
+    }
+    if (trendLines.length > 0) {
+      console.log('     팀별 변화:');
+      for (const line of trendLines) console.log(line);
+    }
+
+    // Pass rate trend
+    const recentPassRate = Math.round(recentHalf.filter(r => r.pipeline.overallStatus === 'pass').length / recentHalf.length * 100);
+    const olderPassRate = Math.round(olderHalf.filter(r => r.pipeline.overallStatus === 'pass').length / olderHalf.length * 100);
+    const prDiff = recentPassRate - olderPassRate;
+    const prArrow = prDiff > 0 ? '↑' : prDiff < 0 ? '↓' : '→';
+    console.log(`     통과율: ${olderPassRate}% → ${recentPassRate}% ${prArrow}`);
+  }
+
   // Cost tracking
   try {
     const { formatCostSummary } = require('../core/cost-tracker');

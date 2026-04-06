@@ -69,7 +69,75 @@ async function handleHealth(): Promise<object> {
 // IDENTITY_SEAL: PART-1 | role=route-handlers | inputs=body | outputs=object
 
 // ============================================================
-// PART 2 — Server
+// PART 2 — Auth, Cache & Rate Limiting Middleware
+// ============================================================
+
+// API key validation — set CS_QUILL_API_KEY env var to enable
+function validateApiKey(req: IncomingMessage): boolean {
+  const requiredKey = process.env.CS_QUILL_API_KEY;
+  if (!requiredKey) return true; // no key configured = open access
+  const provided = req.headers['x-api-key'] as string | undefined;
+  return provided === requiredKey;
+}
+
+// In-memory response cache (keyed by route + body hash)
+const responseCache = new Map<string, { result: object; timestamp: number }>();
+const CACHE_TTL_MS = 60_000; // 1 minute
+
+function getCacheKey(route: string, body: string): string {
+  // Simple hash: sum of char codes, good enough for local cache
+  let hash = 0;
+  for (let i = 0; i < body.length; i++) {
+    hash = ((hash << 5) - hash + body.charCodeAt(i)) | 0;
+  }
+  return `${route}:${hash}`;
+}
+
+function getCached(key: string): object | null {
+  const entry = responseCache.get(key);
+  if (!entry) return null;
+  if (Date.now() - entry.timestamp > CACHE_TTL_MS) {
+    responseCache.delete(key);
+    return null;
+  }
+  return entry.result;
+}
+
+function setCache(key: string, result: object): void {
+  // Evict oldest entries if cache grows too large
+  if (responseCache.size > 200) {
+    const oldestKey = responseCache.keys().next().value;
+    if (oldestKey) responseCache.delete(oldestKey);
+  }
+  responseCache.set(key, { result, timestamp: Date.now() });
+}
+
+// Rate limiter — max 100 requests per minute per IP
+const rateLimitMap = new Map<string, { count: number; windowStart: number }>();
+const RATE_LIMIT_MAX = 100;
+const RATE_LIMIT_WINDOW_MS = 60_000;
+
+function checkRateLimit(req: IncomingMessage): { allowed: boolean; remaining: number } {
+  const ip = (req.headers['x-forwarded-for'] as string)?.split(',')[0]?.trim()
+    || req.socket.remoteAddress
+    || 'unknown';
+  const now = Date.now();
+  let entry = rateLimitMap.get(ip);
+
+  if (!entry || now - entry.windowStart > RATE_LIMIT_WINDOW_MS) {
+    entry = { count: 0, windowStart: now };
+    rateLimitMap.set(ip, entry);
+  }
+
+  entry.count++;
+  const remaining = Math.max(0, RATE_LIMIT_MAX - entry.count);
+  return { allowed: entry.count <= RATE_LIMIT_MAX, remaining };
+}
+
+// IDENTITY_SEAL: PART-2 | role=middleware | inputs=req | outputs=auth,cache,ratelimit
+
+// ============================================================
+// PART 3 — Server
 // ============================================================
 
 export async function runServe(port: string): Promise<void> {
@@ -94,11 +162,28 @@ export async function runServe(port: string): Promise<void> {
     // CORS
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-API-Key');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
       res.end();
+      return;
+    }
+
+    // ── Rate Limiting ──
+    const rateResult = checkRateLimit(req);
+    res.setHeader('X-RateLimit-Limit', String(RATE_LIMIT_MAX));
+    res.setHeader('X-RateLimit-Remaining', String(rateResult.remaining));
+    if (!rateResult.allowed) {
+      res.writeHead(429, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Rate limit exceeded (100 req/min). Retry later.' }));
+      return;
+    }
+
+    // ── API Key Auth ──
+    if (!validateApiKey(req)) {
+      res.writeHead(401, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: 'Invalid or missing API key. Set X-API-Key header.' }));
       return;
     }
 
@@ -123,7 +208,25 @@ export async function runServe(port: string): Promise<void> {
       }
       const parsed = body || '{}';
       try { JSON.parse(parsed); } catch { body = '{}'; }
+
+      // ── Cache Check ──
+      const cacheKey = getCacheKey(url, parsed);
+      const cached = getCached(cacheKey);
+      if (cached) {
+        res.setHeader('X-Cache', 'HIT');
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify(cached));
+        return;
+      }
+
       const result = await handler(parsed);
+
+      // ── Cache Store (skip /health since it changes) ──
+      if (url !== '/health') {
+        setCache(cacheKey, result);
+      }
+
+      res.setHeader('X-Cache', 'MISS');
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify(result));
     } catch (err) {
@@ -138,8 +241,12 @@ export async function runServe(port: string): Promise<void> {
     for (const route of Object.keys(ROUTES)) {
       console.log(`    POST http://localhost:${portNum}${route}`);
     }
+    const authMode = process.env.CS_QUILL_API_KEY ? '🔒 API Key 인증 활성' : '🔓 인증 없음 (CS_QUILL_API_KEY 미설정)';
+    console.log(`\n  ${authMode}`);
+    console.log('  📦 응답 캐시: 1분 TTL');
+    console.log('  🚦 Rate limit: 100 req/min per IP');
     console.log('\n  Ctrl+C 로 종료\n');
   });
 }
 
-// IDENTITY_SEAL: PART-2 | role=server | inputs=port | outputs=http-server
+// IDENTITY_SEAL: PART-3 | role=server | inputs=port | outputs=http-server

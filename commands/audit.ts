@@ -77,19 +77,10 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
   }
   console.log(`  📁 ${files.length}개 파일 수집됨\n`);
 
-  // Build audit context
-  const packageJson = loadPackageJson(rootPath);
-  const ctx = {
-    files,
-    packageJson,
-    rootPath,
-    gitInfo: null,
-  };
-
-  // Run audit engine
+  // Run audit engine (passes rootPath directly — runProjectAudit handles file collection internally)
   const { runProjectAudit, formatAuditReport } = require('../core/pipeline-bridge');
 
-  const report = runProjectAudit(ctx as never, (area, index, total) => {
+  const report = await runProjectAudit(rootPath, (area: string, index: number, total: number) => {
     const bar = '█'.repeat(Math.round((index / total) * 20)) + '░'.repeat(20 - Math.round((index / total) * 20));
     process.stdout.write(`\r  [${bar}] ${index}/${total} ${area.padEnd(20)}`);
   });
@@ -106,17 +97,30 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
   }
 
   if (opts.format === 'sarif') {
+    // Build SARIF results from both areas (low scores) and urgent items
+    const sarifResults: Array<Record<string, unknown>> = [];
+    for (const area of report.areas ?? []) {
+      if (area.score < 60) {
+        sarifResults.push({
+          ruleId: `cs-quill/audit/${area.name}`,
+          level: area.score < 30 ? 'error' : 'warning',
+          message: { text: `[${area.name}] score ${area.score}/100 — ${area.findings?.[0] ?? ''}` },
+        });
+      }
+    }
+    for (const msg of report.urgent ?? []) {
+      sarifResults.push({
+        ruleId: 'cs-quill/audit/urgent',
+        level: 'error',
+        message: { text: typeof msg === 'string' ? msg : (msg as { message?: string }).message ?? String(msg) },
+      });
+    }
     const sarif = {
       $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
       version: '2.1.0',
       runs: [{
         tool: { driver: { name: 'CS Quill Audit', version: '0.1.0' } },
-        results: report.urgent.map((item: { area: string; severity: string; message: string; file?: string }) => ({
-          ruleId: `cs-quill/audit/${item.area}`,
-          level: item.severity === 'critical' ? 'error' : item.severity === 'high' ? 'error' : 'warning',
-          message: { text: item.message },
-          locations: item.file ? [{ physicalLocation: { artifactLocation: { uri: item.file } } }] : [],
-        })),
+        results: sarifResults,
       }],
     };
     console.log(JSON.stringify(sarif, null, 2));
@@ -130,8 +134,10 @@ export async function runAudit(opts: AuditOptions): Promise<void> {
   // Improvement suggestions
   if (report.urgent && report.urgent.length > 0) {
     console.log('\n  💡 가장 시급한 조치:');
-    for (const item of report.urgent.slice(0, 3)) {
-      console.log(`     ${item.rank}. [${item.area}] ${item.message}`);
+    for (let i = 0; i < Math.min(3, report.urgent.length); i++) {
+      const item = report.urgent[i];
+      const msg = typeof item === 'string' ? item : (item as { message?: string }).message ?? String(item);
+      console.log(`     ${i + 1}. ${msg}`);
     }
   }
 

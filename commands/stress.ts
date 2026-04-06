@@ -146,43 +146,99 @@ export async function runStress(path: string, opts: StressOptions): Promise<void
       console.log(`        ❌ autocannon 실패: ${(e as Error).message}`);
     }
   } else {
-    console.log('\n  [Phase 2] AI 가상 시뮬레이션... (--url <endpoint>로 실측 가능)');
+    console.log('\n  [Phase 2] 실측 동시 실행 테스트... (--url <endpoint>로 HTTP 부하 테스트 가능)');
 
-  try {
-    const { analyzeStress, getScenarios } = require('../core/pipeline-bridge');
-    const scenarios = getScenarios();
-    const targetScenario = opts.scenario
-      ? scenarios.find(s => s.id.includes(opts.scenario!) || s.type === opts.scenario)
-      : scenarios[0];
+    // Real concurrent execution: require() the target file and measure actual execution
+    const concurrency = parseInt(opts.users, 10) || 10;
+    const iterations = parseInt(opts.duration, 10) || 50;
 
-    if (!targetScenario) {
-      console.log('        ⚠️  시나리오를 찾을 수 없습니다.');
-      console.log('        사용 가능: ' + scenarios.map(s => s.id).join(', '));
-    } else {
-      const result = await analyzeStress(code, path, targetScenario);
-      const gradeIcon = result.grade === 'A' ? '🟢' : result.grade === 'B' ? '🟡' : result.grade === 'C' ? '🟠' : '🔴';
+    let targetFn: ((...args: any[]) => any) | null = null;
+    let fnName = '<module>';
 
-      console.log(`        Scenario: ${targetScenario.name} (${targetScenario.virtualUsers} users, ${targetScenario.durationSec}s)`);
-      console.log(`        Avg: ${result.metrics.avgResponseMs}ms | p95: ${result.metrics.p95Ms}ms | p99: ${result.metrics.p99Ms}ms`);
-      console.log(`        Error rate: ${(result.metrics.errorRate * 100).toFixed(2)}%`);
-      console.log(`        Throughput: ${result.metrics.throughputRps} RPS`);
-      console.log(`        ${gradeIcon} Grade: ${result.grade}`);
-
-      if (result.breakingPoint) {
-        console.log(`        💥 Breaking point: ${result.breakingPoint.virtualUsers} users`);
+    // Try to require the target and find an exported function to benchmark
+    try {
+      const resolved = require('path').resolve(path);
+      const targetModule = require(resolved);
+      // Pick first exported function
+      const exportKeys = Object.keys(targetModule).filter(k => typeof targetModule[k] === 'function');
+      if (exportKeys.length > 0) {
+        fnName = exportKeys[0];
+        targetFn = targetModule[fnName];
       }
+    } catch { /* file may not be directly require-able */ }
 
-      if (result.recommendations.length > 0) {
-        console.log('\n        💡 Recommendations:');
-        for (const rec of result.recommendations.slice(0, 5)) {
-          console.log(`           - ${rec}`);
+    if (targetFn) {
+      console.log(`        대상 함수: ${fnName} | 동시성: ${concurrency} | 반복: ${iterations}`);
+
+      const timings: number[] = [];
+      let errors = 0;
+
+      // Run batches of concurrent calls
+      const batchCount = Math.ceil(iterations / concurrency);
+      for (let batch = 0; batch < batchCount; batch++) {
+        const batchSize = Math.min(concurrency, iterations - batch * concurrency);
+        const promises = [];
+        for (let i = 0; i < batchSize; i++) {
+          promises.push((async () => {
+            const t0 = performance.now();
+            try {
+              await targetFn!();
+            } catch {
+              errors++;
+            }
+            return performance.now() - t0;
+          })());
         }
+        const batchTimings = await Promise.all(promises);
+        timings.push(...batchTimings);
       }
+
+      // Compute percentiles
+      timings.sort((a, b) => a - b);
+      const avg = Math.round(timings.reduce((a, b) => a + b, 0) / timings.length * 100) / 100;
+      const p50 = timings[Math.floor(timings.length * 0.5)];
+      const p95 = timings[Math.floor(timings.length * 0.95)];
+      const p99 = timings[Math.floor(timings.length * 0.99)];
+      const minT = timings[0];
+      const maxT = timings[timings.length - 1];
+      const errorRate = errors / timings.length;
+      const totalTime = timings.reduce((a, b) => a + b, 0);
+      const throughput = Math.round(timings.length / (totalTime / 1000 / concurrency) * 100) / 100;
+
+      console.log(`        Avg: ${avg.toFixed(2)}ms | Min: ${minT.toFixed(2)}ms | Max: ${maxT.toFixed(2)}ms`);
+      console.log(`        p50: ${p50.toFixed(2)}ms | p95: ${p95.toFixed(2)}ms | p99: ${p99.toFixed(2)}ms`);
+      console.log(`        Errors: ${errors}/${timings.length} (${(errorRate * 100).toFixed(1)}%)`);
+      console.log(`        Throughput: ~${throughput} ops/s (동시 ${concurrency})`);
+
+      const execGrade = p95 < 1 ? '🟢 A' : p95 < 10 ? '🟡 B' : p95 < 100 ? '🟠 C' : '🔴 D';
+      console.log(`        실행 등급: ${execGrade}`);
+
+      // Recommendations based on real measurements
+      const recs: string[] = [];
+      if (p99 > p95 * 3) recs.push('p99 지연이 p95의 3배 이상 — 일부 호출에서 극단적 지연 발생');
+      if (errorRate > 0.05) recs.push(`에러율 ${(errorRate * 100).toFixed(1)}% — 안정성 점검 필요`);
+      if (maxT > avg * 10) recs.push('최대 지연이 평균의 10배 이상 — 특이값 원인 조사 필요');
+      if (avg > 50) recs.push('평균 실행시간 50ms 초과 — 최적화 검토');
+      if (recs.length > 0) {
+        console.log('\n        💡 실측 기반 권장사항:');
+        for (const rec of recs) console.log(`           - ${rec}`);
+      }
+    } else {
+      // Cannot require the file -- fall back to static-only analysis with code parsing benchmark
+      console.log('        대상 파일에서 export 함수를 찾을 수 없음. 코드 파싱 벤치마크로 대체.');
+
+      const parseTimings: number[] = [];
+      for (let i = 0; i < iterations; i++) {
+        const t0 = performance.now();
+        // Measure real work: re-compute static metrics as benchmark
+        computeStaticMetrics(code);
+        parseTimings.push(performance.now() - t0);
+      }
+      parseTimings.sort((a, b) => a - b);
+      const avg = Math.round(parseTimings.reduce((a, b) => a + b, 0) / parseTimings.length * 100) / 100;
+      const p95 = parseTimings[Math.floor(parseTimings.length * 0.95)];
+      console.log(`        정적분석 반복 ${iterations}회: avg ${avg.toFixed(2)}ms | p95 ${p95.toFixed(2)}ms`);
     }
-  } catch {
-    console.log('        ⚠️  AI 시뮬레이션 스킵 (API 키 없음 또는 네트워크 오류)');
-    console.log('        정적 메트릭만 표시합니다.');
-  }
   } // close else (no --url)
 
   const duration = Math.round(performance.now() - startTime);

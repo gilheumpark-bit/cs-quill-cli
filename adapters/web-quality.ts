@@ -75,6 +75,18 @@ export async function checkBundleSize(rootPath: string) {
     '@mui/material': { minified: '800kB', gzipped: '180kB' },
     'antd': { minified: '1.2MB', gzipped: '350kB' },
     'firebase': { minified: '800kB', gzipped: '200kB' },
+    'jquery': { minified: '90kB', gzipped: '30kB' },
+    'underscore': { minified: '60kB', gzipped: '18kB' },
+    'core-js': { minified: '500kB', gzipped: '150kB' },
+    'd3': { minified: '270kB', gzipped: '80kB' },
+    'chart.js': { minified: '200kB', gzipped: '65kB' },
+    'three': { minified: '600kB', gzipped: '150kB' },
+    'pdf-lib': { minified: '350kB', gzipped: '100kB' },
+    'highlight.js': { minified: '950kB', gzipped: '280kB' },
+    'xlsx': { minified: '800kB', gzipped: '250kB' },
+    'monaco-editor': { minified: '4MB+', gzipped: '1MB+' },
+    'draft-js': { minified: '210kB', gzipped: '60kB' },
+    'quill': { minified: '400kB', gzipped: '110kB' },
   };
 
   const ALTERNATIVES: Record<string, string> = {
@@ -82,6 +94,16 @@ export async function checkBundleSize(rootPath: string) {
     'lodash': 'lodash-es (tree-shakeable) or native Array methods',
     'aws-sdk': '@aws-sdk/* (modular v3)',
     'rxjs': 'Consider if needed — often overengineered for simple cases',
+    'jquery': 'Native DOM APIs (querySelector, fetch)',
+    'underscore': 'lodash-es or native methods',
+    'core-js': 'Only polyfill what you need with @babel/preset-env useBuiltIns',
+    'd3': 'd3-* submodules (tree-shakeable)',
+    'chart.js': 'chart.js/auto with tree-shaking or lightweight alternatives',
+    'highlight.js': 'prism.js (lighter) or shiki (wasm-based)',
+    'xlsx': 'exceljs (streaming) or csv-parse for simple cases',
+    'monaco-editor': '@monaco-editor/react with lazy loading',
+    'draft-js': 'tiptap or lexical (lighter, maintained)',
+    'quill': 'tiptap (modular, lighter)',
   };
 
   for (const dep of deps) {
@@ -143,18 +165,198 @@ export async function runLighthouse(url: string) {
 // IDENTITY_SEAL: PART-3 | role=lighthouse | inputs=url | outputs=scores
 
 // ============================================================
-// PART 4 — Unified Web Quality Runner
+// PART 4 — Tree-Shaking Analysis
 // ============================================================
 
-export async function runFullWebQualityAnalysis(rootPath: string) {
+export async function analyzeTreeShaking(rootPath: string) {
+  const { readFileSync, existsSync, readdirSync, statSync } = require('fs');
+  const { join, relative } = require('path');
+
+  const findings: Array<{ file: string; issue: string; severity: string }> = [];
+  const pkgPath = join(rootPath, 'package.json');
+  if (!existsSync(pkgPath)) return { findings, score: 100, engine: 'tree-shaking' };
+
+  const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+
+  // Check 1: package.json "sideEffects" field
+  if (pkg.sideEffects === undefined) {
+    findings.push({ file: 'package.json', issue: 'Missing "sideEffects" field — bundlers cannot tree-shake safely', severity: 'warning' });
+  }
+
+  // Check 2: CJS vs ESM — check for "type": "module" or .mjs files
+  const hasModuleField = !!pkg.module;
+  const hasTypeModule = pkg.type === 'module';
+  const hasExports = !!pkg.exports;
+
+  if (!hasModuleField && !hasTypeModule && !hasExports) {
+    findings.push({ file: 'package.json', issue: 'No ESM entry (module/exports/type:module) — CJS prevents tree-shaking', severity: 'warning' });
+  }
+
+  // Check 3: Scan source files for barrel exports and wildcard re-exports
+  const IGNORE = new Set(['node_modules', '.next', '.git', 'dist', 'build', '.cache', '__pycache__']);
+  const barrelFiles: string[] = [];
+  const wildcardReExports: Array<{ file: string; line: number }> = [];
+
+  const walk = (dir: string, depth: number = 0): void => {
+    if (depth > 4) return;
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || IGNORE.has(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) { walk(full, depth + 1); continue; }
+        if (!/\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) continue;
+        if (/^index\.(ts|tsx|js|jsx|mjs)$/.test(entry.name)) {
+          try {
+            const content = statSync(full).size < 50000 ? readFileSync(full, 'utf-8') : '';
+            const lines = content.split('\n');
+            const exportLines = lines.filter(l => /^export\s/.test(l.trim()));
+            if (exportLines.length > 0 && exportLines.length === lines.filter(l => l.trim().length > 0).length) {
+              barrelFiles.push(relative(rootPath, full));
+            }
+            for (let i = 0; i < lines.length; i++) {
+              if (/export\s+\*\s+from/.test(lines[i])) {
+                wildcardReExports.push({ file: relative(rootPath, full), line: i + 1 });
+              }
+            }
+          } catch { /* skip */ }
+        }
+      }
+    } catch { /* skip */ }
+  };
+  walk(rootPath);
+
+  if (wildcardReExports.length > 0) {
+    for (const w of wildcardReExports.slice(0, 5)) {
+      findings.push({ file: w.file, issue: `Wildcard re-export (export * from) at line ${w.line} defeats tree-shaking`, severity: 'warning' });
+    }
+  }
+
+  if (barrelFiles.length > 5) {
+    findings.push({ file: `${barrelFiles.length} barrel files`, issue: 'Excessive barrel files (index.ts re-exporting) can defeat tree-shaking', severity: 'info' });
+  }
+
+  // Check 4: Non-tree-shakeable import patterns in source
+  const badImports: Array<{ file: string; line: number; pattern: string }> = [];
+  const checkImports = (dir: string, depth: number = 0): void => {
+    if (depth > 3 || badImports.length >= 10) return;
+    try {
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') || IGNORE.has(entry.name)) continue;
+        const full = join(dir, entry.name);
+        if (entry.isDirectory()) { checkImports(full, depth + 1); continue; }
+        if (!/\.(ts|tsx|js|jsx)$/.test(entry.name)) continue;
+        try {
+          const content = statSync(full).size < 100000 ? readFileSync(full, 'utf-8') : '';
+          const lines = content.split('\n');
+          for (let i = 0; i < lines.length && badImports.length < 10; i++) {
+            // import lodash (full) instead of import { pick } from 'lodash-es'
+            if (/require\(\s*['"]lodash['"]\s*\)/.test(lines[i]) || /import\s+_?\s+from\s+['"]lodash['"]/.test(lines[i])) {
+              badImports.push({ file: relative(rootPath, full), line: i + 1, pattern: 'Full lodash import — use lodash-es or lodash/pick' });
+            }
+            // import * as X — namespace import pulls everything
+            if (/import\s+\*\s+as\s+\w+\s+from/.test(lines[i]) && !/from\s+['"]react['"]/.test(lines[i])) {
+              badImports.push({ file: relative(rootPath, full), line: i + 1, pattern: 'Namespace import (import *) — use named imports' });
+            }
+          }
+        } catch { /* skip */ }
+      }
+    } catch { /* skip */ }
+  };
+  checkImports(rootPath);
+
+  for (const bi of badImports) {
+    findings.push({ file: `${bi.file}:${bi.line}`, issue: bi.pattern, severity: 'warning' });
+  }
+
+  const score = Math.max(0, 100 - findings.filter(f => f.severity === 'warning').length * 10 - findings.filter(f => f.severity === 'info').length * 3);
+  return { findings, score, engine: 'tree-shaking' };
+}
+
+// IDENTITY_SEAL: PART-4 | role=tree-shaking | inputs=rootPath | outputs=findings
+
+// ============================================================
+// PART 5 — Unified Web Quality Runner
+// ============================================================
+
+export async function runFullWebQualityAnalysis(rootPath: string, lighthouseUrl?: string) {
   const results: Array<{ engine: string; score: number; detail: string }> = [];
 
   // Bundle size
   const bundle = await checkBundleSize(rootPath);
   results.push({ engine: 'bundle-size', score: bundle.score, detail: `${bundle.heavyCount} heavy deps / ${bundle.totalDeps} total` });
 
+  // Tree-shaking analysis
+  try {
+    const treeShake = await analyzeTreeShaking(rootPath);
+    results.push({ engine: 'tree-shaking', score: treeShake.score, detail: `${treeShake.findings.length} issues found` });
+  } catch {
+    results.push({ engine: 'tree-shaking', score: 50, detail: 'analysis failed' });
+  }
+
+  // Lighthouse (if URL provided, or detect from package.json scripts)
+  const targetUrl = lighthouseUrl || detectDevUrl(rootPath);
+  if (targetUrl) {
+    try {
+      const lh = await runLighthouse(targetUrl);
+      const lhScore = Math.round((lh.performance + lh.accessibility + lh.bestPractices + lh.seo) / 4);
+      results.push({
+        engine: 'lighthouse',
+        score: lhScore,
+        detail: `perf ${lh.performance} a11y ${lh.accessibility} bp ${lh.bestPractices} seo ${lh.seo}`,
+      });
+    } catch {
+      results.push({ engine: 'lighthouse', score: 0, detail: 'unavailable' });
+    }
+  }
+
+  // Accessibility (scan HTML files in project)
+  try {
+    const { readdirSync, readFileSync, statSync } = require('fs');
+    const { join } = require('path');
+    const htmlFiles: string[] = [];
+    const findHtml = (dir: string, depth: number = 0): void => {
+      if (depth > 2 || htmlFiles.length >= 3) return;
+      try {
+        for (const e of readdirSync(dir, { withFileTypes: true })) {
+          if (['node_modules', '.next', '.git', 'dist'].includes(e.name)) continue;
+          const full = join(dir, e.name);
+          if (e.isDirectory()) { findHtml(full, depth + 1); continue; }
+          if (/\.(html|htm)$/.test(e.name) && statSync(full).size < 500000) {
+            htmlFiles.push(full);
+          }
+        }
+      } catch { /* skip */ }
+    };
+    findHtml(rootPath);
+
+    if (htmlFiles.length > 0) {
+      const htmlContent = readFileSync(htmlFiles[0], 'utf-8');
+      const axeResult = await runAxeAccessibility(htmlContent);
+      results.push({ engine: 'axe-core', score: axeResult.score, detail: `${axeResult.findings.length} issues` });
+    }
+  } catch { /* skip a11y if no HTML found */ }
+
   const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 0;
   return { engines: results.length, results, avgScore };
 }
 
-// IDENTITY_SEAL: PART-4 | role=unified-web | inputs=rootPath | outputs=results
+/** Detect dev server URL from package.json scripts */
+function detectDevUrl(rootPath: string): string | null {
+  try {
+    const { readFileSync, existsSync } = require('fs');
+    const { join } = require('path');
+    const pkgPath = join(rootPath, 'package.json');
+    if (!existsSync(pkgPath)) return null;
+    const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+    const scripts = pkg.scripts ?? {};
+    // Check if start/dev script exists — suggest localhost
+    if (scripts.start || scripts.dev) {
+      const portMatch = JSON.stringify(scripts).match(/(?:port|PORT)[=\s]*(\d{4,5})/);
+      const port = portMatch ? portMatch[1] : '3000';
+      return `http://localhost:${port}`;
+    }
+  } catch { /* skip */ }
+  return null;
+}
+
+// IDENTITY_SEAL: PART-5 | role=unified-web | inputs=rootPath | outputs=results

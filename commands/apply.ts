@@ -3,7 +3,7 @@
 // ============================================================
 // 원본 보존 모드: .cs/generated/ → 원본에 적용 / 롤백.
 
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from 'fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync, unlinkSync, renameSync } from 'fs';
 import { join, basename } from 'path';
 
 // ============================================================
@@ -46,12 +46,30 @@ export async function runApply(file: string | undefined, opts: ApplyOptions): Pr
 
   console.log('🦔 CS Quill — 수정본 적용\n');
 
+  let applied = 0;
+  let failed = 0;
+
   for (const f of filesToApply) {
     const generatedPath = join(generatedDir, f);
     const targetPath = join(process.cwd(), 'src', f);
 
     if (!existsSync(generatedPath)) {
       console.log(`  ⚠️  ${f} — 수정본 없음`);
+      continue;
+    }
+
+    // Read generated content first to validate
+    let content: string;
+    try {
+      content = readFileSync(generatedPath, 'utf-8');
+    } catch (err) {
+      console.log(`  ❌ ${f} — 수정본 읽기 실패: ${(err as Error).message}`);
+      failed++;
+      continue;
+    }
+
+    if (!content || content.trim().length === 0) {
+      console.log(`  ⚠️  ${f} — 수정본이 비어있음, 건너뜀`);
       continue;
     }
 
@@ -63,8 +81,7 @@ export async function runApply(file: string | undefined, opts: ApplyOptions): Pr
         if (cfg.fileMode !== 'yolo') {
           const { computeDiff, formatDiff, printDiffSummary } = require('../tui/diff-preview');
           const original = readFileSync(targetPath, 'utf-8');
-          const modified = readFileSync(generatedPath, 'utf-8');
-          const diff = computeDiff(original, modified);
+          const diff = computeDiff(original, content);
           const changed = diff.filter(d => d.type !== 'unchanged').length;
           if (changed > 0) {
             console.log(`\n  📊 ${f}: ${printDiffSummary(diff)}`);
@@ -73,20 +90,55 @@ export async function runApply(file: string | undefined, opts: ApplyOptions): Pr
         }
       } catch { /* diff optional */ }
 
-      // Backup
-      const backupName = `${f}.${Date.now()}`;
-      copyFileSync(targetPath, join(backupDir, backupName));
-      console.log(`  📋 ${f} 백업 → .cs/backup/${backupName}`);
+      // Backup original before overwriting
+      try {
+        const backupName = `${f}.${Date.now()}`;
+        copyFileSync(targetPath, join(backupDir, backupName));
+        console.log(`  📋 ${f} 백업 → .cs/backup/${backupName}`);
+      } catch (err) {
+        console.log(`  ❌ ${f} — 백업 실패: ${(err as Error).message}`);
+        failed++;
+        continue; // Don't apply if backup failed
+      }
     }
 
-    // Apply
-    const content = readFileSync(generatedPath, 'utf-8');
-    mkdirSync(join(process.cwd(), 'src'), { recursive: true });
-    writeFileSync(targetPath, content, 'utf-8');
-    console.log(`  ✅ ${f} → src/${f} 적용 완료`);
+    // Atomic write: write to temp file first, then rename
+    try {
+      mkdirSync(join(process.cwd(), 'src'), { recursive: true });
+      const tmpPath = targetPath + '.tmp.' + Date.now();
+      writeFileSync(tmpPath, content, 'utf-8');
+
+      // Verify temp file was written correctly
+      const verify = readFileSync(tmpPath, 'utf-8');
+      if (verify.length !== content.length) {
+        unlinkSync(tmpPath);
+        throw new Error('쓰기 검증 실패: 크기 불일치');
+      }
+
+      // Rename temp to target (atomic on most filesystems)
+      renameSync(tmpPath, targetPath);
+
+      console.log(`  ✅ ${f} → src/${f} 적용 완료 (${content.length}자)`);
+      applied++;
+    } catch (err) {
+      console.log(`  ❌ ${f} — 적용 실패: ${(err as Error).message}`);
+      failed++;
+      // Clean up temp file if it exists
+      try {
+        const tmpGlob = targetPath + '.tmp.';
+        const { readdirSync: ls } = require('fs');
+        const dir = require('path').dirname(targetPath);
+        const base = require('path').basename(targetPath);
+        for (const tmp of ls(dir)) {
+          if (tmp.startsWith(base + '.tmp.')) {
+            try { unlinkSync(join(dir, tmp)); } catch { /* ignore */ }
+          }
+        }
+      } catch { /* ignore cleanup errors */ }
+    }
   }
 
-  console.log('');
+  console.log(`\n  완료: ${applied}개 적용, ${failed}개 실패\n`);
 }
 
 // IDENTITY_SEAL: PART-1 | role=apply | inputs=file,opts | outputs=files

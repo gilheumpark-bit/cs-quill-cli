@@ -317,21 +317,327 @@ export async function runStryker(rootPath: string): Promise<MutationResult> {
 // IDENTITY_SEAL: PART-3 | role=stryker | inputs=rootPath | outputs=MutationResult
 
 // ============================================================
-// PART 4 — Unified Test Runner
+// PART 4 — Mocha Runner
 // ============================================================
 
-export async function runFullTestAnalysis(rootPath: string) {
+export interface MochaResult {
+  total: number;
+  passed: number;
+  failed: number;
+  pending: number;
+  duration: number;
+  failures: Array<{ name: string; error: string; file: string }>;
+}
+
+export async function runMocha(rootPath: string): Promise<MochaResult> {
+  const { execSync } = require('child_process');
+
+  try {
+    const output = execSync('npx mocha --reporter json --recursive 2>/dev/null', {
+      cwd: rootPath, encoding: 'utf-8', timeout: 120000,
+    });
+
+    const data = JSON.parse(output);
+    return {
+      total: data.stats?.tests ?? 0,
+      passed: data.stats?.passes ?? 0,
+      failed: data.stats?.failures ?? 0,
+      pending: data.stats?.pending ?? 0,
+      duration: data.stats?.duration ?? 0,
+      failures: (data.failures ?? []).map((f: unknown) => ({
+        name: f.fullTitle ?? f.title ?? 'unknown',
+        error: f.err?.message?.slice(0, 200) ?? 'unknown',
+        file: f.file ?? '',
+      })),
+    };
+  } catch {
+    return { total: 0, passed: 0, failed: 0, pending: 0, duration: 0, failures: [] };
+  }
+}
+
+// IDENTITY_SEAL: PART-4 | role=mocha | inputs=rootPath | outputs=MochaResult
+
+// ============================================================
+// PART 5 — Test Runner Auto-Detection
+// ============================================================
+
+export type TestRunner = 'vitest' | 'jest' | 'mocha' | 'unknown';
+
+export function detectTestRunner(rootPath: string): { runner: TestRunner; configFile: string | null } {
+  const { existsSync, readFileSync } = require('fs');
+  const { join } = require('path');
+
+  // Check for vitest config
+  const vitestConfigs = ['vitest.config.ts', 'vitest.config.js', 'vitest.config.mts', 'vitest.config.mjs'];
+  for (const cfg of vitestConfigs) {
+    if (existsSync(join(rootPath, cfg))) return { runner: 'vitest', configFile: cfg };
+  }
+
+  // Check for jest config
+  const jestConfigs = ['jest.config.ts', 'jest.config.js', 'jest.config.cjs', 'jest.config.mjs', 'jest.config.json'];
+  for (const cfg of jestConfigs) {
+    if (existsSync(join(rootPath, cfg))) return { runner: 'jest', configFile: cfg };
+  }
+
+  // Check for mocha config
+  const mochaConfigs = ['.mocharc.yml', '.mocharc.yaml', '.mocharc.json', '.mocharc.js', '.mocharc.cjs'];
+  for (const cfg of mochaConfigs) {
+    if (existsSync(join(rootPath, cfg))) return { runner: 'mocha', configFile: cfg };
+  }
+
+  // Check package.json for runner hints
+  try {
+    const pkgPath = join(rootPath, 'package.json');
+    if (existsSync(pkgPath)) {
+      const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8'));
+      const allDeps = { ...pkg.dependencies, ...pkg.devDependencies };
+      const scripts = JSON.stringify(pkg.scripts ?? {});
+
+      if (allDeps['vitest'] || scripts.includes('vitest')) return { runner: 'vitest', configFile: null };
+      if (allDeps['jest'] || scripts.includes('jest')) return { runner: 'jest', configFile: null };
+      if (allDeps['mocha'] || scripts.includes('mocha')) return { runner: 'mocha', configFile: null };
+
+      // Check for jest config in package.json
+      if (pkg.jest) return { runner: 'jest', configFile: 'package.json (jest key)' };
+    }
+  } catch { /* skip */ }
+
+  return { runner: 'unknown', configFile: null };
+}
+
+// IDENTITY_SEAL: PART-5 | role=detect-runner | inputs=rootPath | outputs=runner
+
+// ============================================================
+// PART 6 — Coverage Threshold Enforcement
+// ============================================================
+
+export interface CoverageThresholds {
+  lines?: number;
+  branches?: number;
+  functions?: number;
+  statements?: number;
+}
+
+export interface CoverageEnforcementResult {
+  passed: boolean;
+  actual: { lines: number; branches: number; functions: number; statements: number };
+  thresholds: CoverageThresholds;
+  failures: Array<{ metric: string; actual: number; threshold: number; gap: number }>;
+}
+
+export async function enforceCoverageThresholds(
+  rootPath: string,
+  thresholds: CoverageThresholds = { lines: 80, branches: 70, functions: 80, statements: 80 },
+): Promise<CoverageEnforcementResult> {
+  const { readFileSync, existsSync } = require('fs');
+  const { join } = require('path');
+
+  // Try reading existing coverage data
+  const coveragePaths = [
+    join(rootPath, 'coverage', 'coverage-summary.json'),
+    join(rootPath, 'coverage', 'coverage-final.json'),
+  ];
+
+  let actual = { lines: 0, branches: 0, functions: 0, statements: 0 };
+
+  for (const covPath of coveragePaths) {
+    if (existsSync(covPath)) {
+      try {
+        const data = JSON.parse(readFileSync(covPath, 'utf-8'));
+        const total = data.total ?? {};
+        actual = {
+          lines: total.lines?.pct ?? 0,
+          branches: total.branches?.pct ?? 0,
+          functions: total.functions?.pct ?? 0,
+          statements: total.statements?.pct ?? 0,
+        };
+        break;
+      } catch { /* skip */ }
+    }
+  }
+
+  // If no coverage data, try generating it
+  if (actual.lines === 0 && actual.branches === 0) {
+    try {
+      const { execSync } = require('child_process');
+      const detected = detectTestRunner(rootPath);
+      let cmd = '';
+      if (detected.runner === 'vitest') cmd = 'npx vitest run --coverage --reporter=json 2>/dev/null';
+      else if (detected.runner === 'jest') cmd = 'npx jest --coverage --coverageReporters=json-summary 2>/dev/null';
+
+      if (cmd) {
+        execSync(cmd, { cwd: rootPath, encoding: 'utf-8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
+        const summaryPath = join(rootPath, 'coverage', 'coverage-summary.json');
+        if (existsSync(summaryPath)) {
+          const data = JSON.parse(readFileSync(summaryPath, 'utf-8'));
+          const total = data.total ?? {};
+          actual = {
+            lines: total.lines?.pct ?? 0,
+            branches: total.branches?.pct ?? 0,
+            functions: total.functions?.pct ?? 0,
+            statements: total.statements?.pct ?? 0,
+          };
+        }
+      }
+    } catch { /* coverage generation failed */ }
+  }
+
+  const failures: CoverageEnforcementResult['failures'] = [];
+  const metrics = ['lines', 'branches', 'functions', 'statements'] as const;
+  for (const m of metrics) {
+    const threshold = thresholds[m];
+    if (threshold !== undefined && actual[m] < threshold) {
+      failures.push({ metric: m, actual: actual[m], threshold, gap: Math.round((threshold - actual[m]) * 10) / 10 });
+    }
+  }
+
+  return { passed: failures.length === 0, actual, thresholds, failures };
+}
+
+// IDENTITY_SEAL: PART-6 | role=coverage-threshold | inputs=rootPath,thresholds | outputs=CoverageEnforcementResult
+
+// ============================================================
+// PART 7 — Flaky Test Detection
+// ============================================================
+
+export interface FlakyTestResult {
+  flakyTests: Array<{ name: string; file: string; passCount: number; failCount: number; flakyRate: number }>;
+  totalRuns: number;
+  totalFlaky: number;
+}
+
+export async function detectFlakyTests(rootPath: string, runs: number = 3): Promise<FlakyTestResult> {
+  const { execSync } = require('child_process');
+  const detected = detectTestRunner(rootPath);
+
+  // Track test outcomes across multiple runs
+  const testOutcomes = new Map<string, { file: string; passes: number; fails: number }>();
+
+  for (let r = 0; r < runs; r++) {
+    try {
+      let cmd = '';
+      if (detected.runner === 'vitest') cmd = 'npx vitest run --reporter=json 2>/dev/null';
+      else if (detected.runner === 'jest') cmd = 'npx jest --json 2>/dev/null';
+      else if (detected.runner === 'mocha') cmd = 'npx mocha --reporter json --recursive 2>/dev/null';
+      else cmd = 'npx vitest run --reporter=json 2>/dev/null';
+
+      const output = execSync(cmd, { cwd: rootPath, encoding: 'utf-8', timeout: 120000, stdio: ['pipe', 'pipe', 'pipe'] });
+      const data = JSON.parse(output);
+
+      // Parse test results depending on runner format
+      if (detected.runner === 'mocha') {
+        for (const test of (data.passes ?? [])) {
+          const key = `${test.fullTitle}`;
+          const existing = testOutcomes.get(key) ?? { file: test.file ?? '', passes: 0, fails: 0 };
+          existing.passes++;
+          testOutcomes.set(key, existing);
+        }
+        for (const test of (data.failures ?? [])) {
+          const key = `${test.fullTitle}`;
+          const existing = testOutcomes.get(key) ?? { file: test.file ?? '', passes: 0, fails: 0 };
+          existing.fails++;
+          testOutcomes.set(key, existing);
+        }
+      } else {
+        // Vitest/Jest format
+        for (const tr of (data.testResults ?? [])) {
+          for (const ar of (tr.assertionResults ?? [])) {
+            const key = ar.fullName ?? ar.title ?? 'unknown';
+            const existing = testOutcomes.get(key) ?? { file: tr.name ?? '', passes: 0, fails: 0 };
+            if (ar.status === 'passed') existing.passes++;
+            else if (ar.status === 'failed') existing.fails++;
+            testOutcomes.set(key, existing);
+          }
+        }
+      }
+    } catch { /* run failed entirely, skip */ }
+  }
+
+  // Identify flaky tests: tests that both passed and failed across runs
+  const flakyTests: FlakyTestResult['flakyTests'] = [];
+  for (const [name, outcome] of testOutcomes) {
+    if (outcome.passes > 0 && outcome.fails > 0) {
+      const totalRuns = outcome.passes + outcome.fails;
+      flakyTests.push({
+        name,
+        file: outcome.file,
+        passCount: outcome.passes,
+        failCount: outcome.fails,
+        flakyRate: Math.round((outcome.fails / totalRuns) * 100),
+      });
+    }
+  }
+
+  flakyTests.sort((a, b) => b.flakyRate - a.flakyRate);
+
+  return { flakyTests, totalRuns: runs, totalFlaky: flakyTests.length };
+}
+
+// IDENTITY_SEAL: PART-7 | role=flaky-detection | inputs=rootPath,runs | outputs=FlakyTestResult
+
+// ============================================================
+// PART 8 — Unified Test Runner
+// ============================================================
+
+export async function runFullTestAnalysis(rootPath: string, opts?: {
+  coverageThresholds?: CoverageThresholds;
+  detectFlaky?: boolean;
+  flakyRuns?: number;
+}) {
   const results: Array<{ engine: string; score: number; detail: string }> = [];
 
-  // Vitest/Jest
-  const testResult = await runVitest(rootPath);
-  const testScore = testResult.total > 0 ? Math.round((testResult.passed / testResult.total) * 100) : 0;
-  const failDetail = testResult.failures.length > 0
-    ? ` — ${testResult.failures[0].name}: ${testResult.failures[0].error.slice(0, 60)}`
-    : '';
-  results.push({ engine: 'vitest/jest', score: testScore, detail: `${testResult.passed}/${testResult.total} passed${failDetail}` });
+  // Auto-detect test runner
+  const detected = detectTestRunner(rootPath);
+  let testResult: VitestResult | MochaResult;
 
-  // Stryker (only if tests exist)
+  if (detected.runner === 'mocha') {
+    const mochaResult = await runMocha(rootPath);
+    testResult = { ...mochaResult, skipped: mochaResult.pending };
+    const testScore = mochaResult.total > 0 ? Math.round((mochaResult.passed / mochaResult.total) * 100) : 0;
+    const failDetail = mochaResult.failures.length > 0
+      ? ` — ${mochaResult.failures[0].name}: ${mochaResult.failures[0].error.slice(0, 60)}`
+      : '';
+    results.push({ engine: `mocha (auto-detected)`, score: testScore, detail: `${mochaResult.passed}/${mochaResult.total} passed${failDetail}` });
+  } else {
+    // Vitest/Jest (existing logic with fallback chain)
+    const vitestResult = await runVitest(rootPath);
+    testResult = vitestResult;
+    const testScore = vitestResult.total > 0 ? Math.round((vitestResult.passed / vitestResult.total) * 100) : 0;
+    const failDetail = vitestResult.failures.length > 0
+      ? ` — ${vitestResult.failures[0].name}: ${vitestResult.failures[0].error.slice(0, 60)}`
+      : '';
+    const runnerLabel = detected.runner !== 'unknown' ? detected.runner : 'vitest/jest';
+    results.push({ engine: `${runnerLabel} (auto-detected)`, score: testScore, detail: `${vitestResult.passed}/${vitestResult.total} passed${failDetail}` });
+  }
+
+  // Coverage threshold enforcement
+  try {
+    const thresholds = opts?.coverageThresholds ?? { lines: 80, branches: 70, functions: 80, statements: 80 };
+    const coverage = await enforceCoverageThresholds(rootPath, thresholds);
+    const covScore = coverage.passed ? 100 : Math.max(0, 100 - coverage.failures.length * 15);
+    const covDetail = coverage.passed
+      ? `all thresholds met (L:${coverage.actual.lines}% B:${coverage.actual.branches}% F:${coverage.actual.functions}%)`
+      : coverage.failures.map(f => `${f.metric}: ${f.actual}% < ${f.threshold}%`).join(', ');
+    results.push({ engine: 'coverage-threshold', score: covScore, detail: covDetail });
+  } catch {
+    results.push({ engine: 'coverage-threshold', score: 0, detail: 'not available' });
+  }
+
+  // Flaky test detection (optional, expensive)
+  if (opts?.detectFlaky && testResult.total > 0) {
+    try {
+      const flaky = await detectFlakyTests(rootPath, opts.flakyRuns ?? 3);
+      const flakyScore = flaky.totalFlaky === 0 ? 100 : Math.max(0, 100 - flaky.totalFlaky * 20);
+      const flakyDetail = flaky.totalFlaky === 0
+        ? 'no flaky tests detected'
+        : `${flaky.totalFlaky} flaky: ${flaky.flakyTests.slice(0, 3).map(f => `${f.name} (${f.flakyRate}%)`).join(', ')}`;
+      results.push({ engine: 'flaky-detection', score: flakyScore, detail: flakyDetail });
+    } catch {
+      results.push({ engine: 'flaky-detection', score: 50, detail: 'detection failed' });
+    }
+  }
+
+  // Stryker (only if tests exist and passed)
   if (testResult.total > 0 && testResult.passed > 0) {
     try {
       const mutation = await runStryker(rootPath);
@@ -347,7 +653,7 @@ export async function runFullTestAnalysis(rootPath: string) {
   }
 
   const avgScore = results.length > 0 ? Math.round(results.reduce((s, r) => s + r.score, 0) / results.length) : 0;
-  return { engines: results.length, results, avgScore };
+  return { engines: results.length, results, avgScore, detectedRunner: detected };
 }
 
-// IDENTITY_SEAL: PART-4 | role=unified-test | inputs=rootPath | outputs=results
+// IDENTITY_SEAL: PART-8 | role=unified-test | inputs=rootPath | outputs=results
