@@ -15,7 +15,7 @@ export const syn001Detector: RuleDetector = {
       const rawMsg = diag.getMessageText();
       const msg = typeof rawMsg === 'string' ? rawMsg : (rawMsg as any).messageText || '';
       
-      if (diag.getCode() === 1005 && (msg.includes(\"'{'\") || msg.includes(\"'}'\"))) {
+      if (diag.getCode() === 1005 && (msg.includes("'{'") || msg.includes("'}'"))) {
         findings.push({ 
           line: diag.getLineNumber() || 1, 
           message: `중괄호 불균형 위반: ${msg}` 

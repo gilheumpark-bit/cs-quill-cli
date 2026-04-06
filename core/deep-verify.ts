@@ -434,7 +434,84 @@ function checkMathLogic(code: string, fileName: string): DeepFinding[] {
 // IDENTITY_SEAL: PART-7 | role=math-logic | inputs=code | outputs=DeepFinding[]
 
 // ============================================================
-// PART 8 — Unified Deep Verify Runner
+// PART 8 — Check: 로직/의미 오류 (P1 방지)
+// ============================================================
+
+function checkLogicSemantics(code: string, fileName: string): DeepFinding[] {
+  const findings: DeepFinding[] = [];
+  const lines = code.split('\n');
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+
+    // 무의미한 조건
+    if (/if\s*\(\s*true\s*\)/.test(line) || /if\s*\(\s*false\s*\)/.test(line)) {
+      findings.push({
+        file: fileName, line: i + 1,
+        message: 'Meaningless literal in if condition',
+        severity: 'P1', category: 'logic-semantics',
+        fix: 'Remove the condition or use a proper variable',
+      });
+    }
+
+    // 동일 식별자 비교
+    const eqMatch = line.match(/if\s*\(\s*([a-zA-Z_]\w*)\s*(?:===|==|!==|!=)\s*\1\s*\)/);
+    if (eqMatch) {
+      findings.push({
+        file: fileName, line: i + 1,
+        message: `Meaningless comparison of identical identifier '${eqMatch[1]}'`,
+        severity: 'P1', category: 'logic-semantics',
+        fix: 'Fix the condition to compare different values',
+      });
+    }
+
+    // Early return 안티패턴: if 안에서 return 하는데 else 블록이 있음
+    if (/if\s*\(/.test(line)) {
+      const block = lines.slice(i, Math.min(i + 15, lines.length)).join('\n');
+      if (block.match(/if\s*\([^)]+\)\s*\{\s*return[^;]*;\s*\}\s*else\s*\{/)) {
+         findings.push({
+          file: fileName, line: i + 1,
+          message: 'Early return anti-pattern: else block after if containing return',
+          severity: 'P2', category: 'logic-semantics',
+          fix: 'Remove else block and unindent its contents',
+        });
+      }
+    }
+
+    // 의도되지 않은 switch fallthrough (case 블록 마지막에 break/return 없고 주석도 없는 경우)
+    if (/\bcase\s+[^:]+:/.test(line) || /\bdefault\s*:/.test(line)) {
+       // Search forward for the next case or end of switch
+       let j = i + 1;
+       let caseBody = '';
+       while(j < lines.length && !(/\bcase\s+[^:]+:/.test(lines[j]) || /\bdefault\s*:/.test(lines[j]) || /^\s*\}\s*$/.test(lines[j]))) {
+           caseBody += lines[j] + '\n';
+           j++;
+       }
+
+       if (caseBody.trim().length > 0) { // Not an empty case (intentional stacking)
+           if (!/break\s*;/.test(caseBody) && !/return\b/.test(caseBody) && !/throw\b/.test(caseBody)) {
+               // Check for fallthrough comment
+               if (!/falls?\s*through/i.test(caseBody)) {
+                   findings.push({
+                      file: fileName, line: i + 1,
+                      message: 'Potential switch fallthrough: case block missing break/return without fallthrough comment',
+                      severity: 'P1', category: 'logic-semantics',
+                      fix: 'Add break; or // fallsthrough comment',
+                   });
+               }
+           }
+       }
+    }
+  }
+
+  return findings;
+}
+
+// IDENTITY_SEAL: PART-8 | role=logic-semantics | inputs=code | outputs=DeepFinding[]
+
+
+// ============================================================
+// PART 9 — Unified Deep Verify Runner
 // ============================================================
 
 export function runDeepVerify(code: string, fileName: string): DeepVerifyResult {
@@ -447,6 +524,7 @@ export function runDeepVerify(code: string, fileName: string): DeepVerifyResult 
     ...checkUnsafeCasts(code, fileName),
     ...checkResourceLeaks(code, fileName),
     ...checkMathLogic(code, fileName),
+    ...checkLogicSemantics(code, fileName),
   ];
 
   // Deduplicate (same file + same line + same category)
@@ -467,13 +545,13 @@ export function runDeepVerify(code: string, fileName: string): DeepVerifyResult 
   return {
     findings: unique,
     score,
-    checks: 6,
+    checks: 7,
     duration: Math.round(performance.now() - start),
   };
 }
 
 // ============================================================
-// PART 9 — Project-Wide Deep Verify
+// PART 10 — Project-Wide Deep Verify
 // ============================================================
 
 export function runDeepVerifyProject(rootPath: string): {
@@ -526,4 +604,4 @@ export function runDeepVerifyProject(rootPath: string): {
   };
 }
 
-// IDENTITY_SEAL: PART-9 | role=project-verify | inputs=rootPath | outputs=project-results
+// IDENTITY_SEAL: PART-10 | role=project-verify | inputs=rootPath | outputs=project-results
