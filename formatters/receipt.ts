@@ -51,8 +51,16 @@ export interface ReceiptData {
 // PART 2 — Hash Chain
 // ============================================================
 
-let lastReceiptHash: string | null = null;
 const HMAC_SECRET = process.env.CS_RECEIPT_SECRET ?? 'cs-quill-receipt-chain-v1';
+const CHAIN_HEAD_FILE = '.cs/chain-head.txt';
+
+// 디스크에서 chain head 복원
+let lastReceiptHash: string | null = null;
+try {
+  const { readFileSync } = require('fs');
+  const { join } = require('path');
+  lastReceiptHash = readFileSync(join(process.cwd(), CHAIN_HEAD_FILE), 'utf-8').trim() || null;
+} catch { /* 첫 실행 */ }
 
 export function computeReceiptHash(data: Omit<ReceiptData, 'receiptHash'>): string {
   const payload = JSON.stringify(data) + (lastReceiptHash ?? 'GENESIS');
@@ -67,6 +75,14 @@ export function verifyReceiptHash(receipt: ReceiptData, previousHash: string | n
 
 export function chainReceipt(receipt: ReceiptData): void {
   lastReceiptHash = receipt.receiptHash;
+  // 디스크에 chain head 저장
+  try {
+    const { writeFileSync, mkdirSync } = require('fs');
+    const { join, dirname } = require('path');
+    const p = join(process.cwd(), CHAIN_HEAD_FILE);
+    mkdirSync(dirname(p), { recursive: true });
+    writeFileSync(p, receipt.receiptHash, 'utf-8');
+  } catch { /* 저장 실패 무시 */ }
 }
 
 export function getChainHead(): string | null {

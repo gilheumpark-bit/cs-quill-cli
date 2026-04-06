@@ -317,6 +317,44 @@ export async function runVerify(path: string, opts: VerifyOptions): Promise<void
 
   // AI orchestrator는 파일별 실행으로 이동 (위 순차 실행 루프 참조)
 
+  // ── Waveform 이상 탐지 ──
+  let waveformAnomalies = 0;
+  try {
+    const { analyzeWaveform } = require('../core/integrity-waveform');
+    const fileStats = files.map(f => {
+      const count = allDetails.filter(d => true).length / Math.max(files.length, 1); // 파일별 평균 추정
+      return { file: f.relativePath, findings: count };
+    });
+    // 팀별 findings로 더 정확하게
+    const teamStats = teams.map(t => ({ file: t.name, findings: t.findings }));
+    const waveform = analyzeWaveform(teamStats);
+    if (waveform.anomalies.length > 0) {
+      waveformAnomalies = waveform.anomalies.length;
+      console.log(`  ⚡ Waveform: ${waveform.anomalies.length}개 팀 이상치 감지 (μ=${waveform.mean}, σ=${waveform.stdDev})`);
+      for (const a of waveform.anomalies) {
+        console.log(`    → ${a.file}: ${a.findings}건 (z=${a.zScore})`);
+      }
+    }
+  } catch { /* waveform 없으면 skip */ }
+
+  // ── Team Isolation ──
+  let isolatedTeamCount = 0;
+  try {
+    const { computeTeamVerdict, aggregateIsolated } = require('../core/team-isolation');
+    const teamVerdicts = teams.map(t => {
+      const teamFindings = allDetails
+        .filter(() => true) // 현재 파일별 분리가 안 되어 있으므로 팀 findings 수로 추정
+        .slice(0, t.findings)
+        .map(d => ({ severity: d.severity, message: d.message }));
+      return computeTeamVerdict(t.name, teamFindings);
+    });
+    const isolated = aggregateIsolated(teamVerdicts);
+    isolatedTeamCount = isolated.isolatedTeams;
+    if (isolatedTeamCount > 0) {
+      console.log(`  🔒 격리: ${isolatedTeamCount}개 팀 bail-out (전체 verdict에서 제외)`);
+    }
+  } catch { /* isolation 없으면 skip */ }
+
   // ── Baseline + Suppression 필터 ──
   let baselineSuppressed = 0;
   let inlineSuppressed = 0;

@@ -33,11 +33,38 @@ export interface PipelineResult {
   score: number;
 }
 
+// ── 팀별 정수 필터 헬퍼 ──
+function filterTeamFindings(
+  teamResult: { name: string; score: number; findings: any[] },
+  code: string,
+  filePath: string = 'analysis.ts',
+): typeof teamResult {
+  try {
+    const { runFalsePositiveFilter } = require('./false-positive-filter');
+    const mapped = teamResult.findings.map((f: any) => ({
+      ruleId: f.ruleId ?? `${teamResult.name}/unknown`,
+      line: f.line ?? 0,
+      message: f.message ?? String(f),
+      severity: f.severity ?? 'warning',
+      confidence: f.confidence ?? 'medium',
+    }));
+    const result = runFalsePositiveFilter(mapped, filePath, code);
+    const kept = result.kept;
+    // 점수 재계산 (필터 후 findings 기준)
+    const errors = kept.filter((f: any) => f.severity === 'error' || f.severity === 'critical').length;
+    const warnings = kept.filter((f: any) => f.severity === 'warning').length;
+    const score = Math.max(0, 100 - errors * 10 - warnings * 2);
+    return { name: teamResult.name, score, findings: kept };
+  } catch {
+    return teamResult; // 필터 없으면 원본
+  }
+}
+
 export async function runStaticPipeline(code: string, language: string): Promise<PipelineResult> {
   const teams: PipelineResult['teams'] = [];
 
   // Team 1: Regex (표면 패턴 — 항상 실행, 1차 필터)
-  teams.push(runRegexTeam(code, language));
+  teams.push(filterTeamFindings(runRegexTeam(code, language), code));
 
   // Team 2: AST (4계층 엔진 — createProgram + TypeChecker + esquery)
   try {
@@ -73,36 +100,35 @@ export async function runStaticPipeline(code: string, language: string): Promise
 
     const capped = dedupedFindings.slice(0, 20);
     const score = Math.max(0, 100 - capped.filter((f: any) => f.severity === 'error').length * 10 - capped.filter((f: any) => f.severity === 'warning').length * 2);
-    teams.push({ name: 'ast', score, findings: capped });
+    teams.push(filterTeamFindings({ name: 'ast', score, findings: capped }, code));
   } catch {
-    // typescript 자체가 없는 극단적 환경 → 정규식 fallback
-    teams.push(runASTFallback(code, language));
+    teams.push(filterTeamFindings(runASTFallback(code, language), code));
   }
 
-  // Team 3: Hollow (빈깡통 — typescript API로 빈 함수 탐지, ast-bridge 순환 제거)
-  teams.push(runHollowCheck(code));
+  // Team 3: Hollow
+  teams.push(filterTeamFindings(runHollowCheck(code), code));
 
-  // Team 4: Dead Code (regex 유지 — 인메모리 코드용)
-  teams.push(runDeadCodeCheck(code));
+  // Team 4: Dead Code
+  teams.push(filterTeamFindings(runDeadCodeCheck(code), code));
 
-  // Team 5: Design Lint (prettier 검증 시도)
+  // Team 5: Design Lint
   try {
     const { checkPrettier } = require('../adapters/lint-engine');
     const prettierResult = await checkPrettier(code, 'analysis.ts');
     const designFindings = runDesignLintCheck(code).findings;
     const score = prettierResult.isFormatted ? Math.max(70, 100 - designFindings.length * 10) : Math.max(0, 60 - designFindings.length * 10);
-    teams.push({ name: 'design-lint', score, findings: [
+    teams.push(filterTeamFindings({ name: 'design-lint', score, findings: [
       ...designFindings,
       ...(prettierResult.isFormatted ? [] : [{ line: 0, message: 'Prettier 포맷 불일치', severity: 'warning' as const }]),
-    ]});
+    ]}, code));
   } catch {
-    teams.push(runDesignLintCheck(code));
+    teams.push(filterTeamFindings(runDesignLintCheck(code), code));
   }
 
-  // Team 6: Cognitive Load (regex 유지 — 경량)
-  teams.push(runCognitiveLoadCheck(code));
+  // Team 6: Cognitive Load
+  teams.push(filterTeamFindings(runCognitiveLoadCheck(code), code));
 
-  // Team 7: Bug Pattern (deep-verify 6검증 실체 엔진)
+  // Team 7: Bug Pattern
   try {
     const { runDeepVerify } = require('./deep-verify');
     const deepResult = await runDeepVerify(code, 'analysis.ts');
@@ -111,14 +137,13 @@ export async function runStaticPipeline(code: string, language: string): Promise
       severity: (f.severity === 'P0' ? 'error' : 'warning') as 'error' | 'warning',
     }));
     const score = Math.max(0, 100 - findings.filter(f => f.severity === 'error').length * 10 - findings.filter(f => f.severity === 'warning').length * 2);
-    teams.push({ name: 'bug-pattern', score, findings: findings.slice(0, 20) });
+    teams.push(filterTeamFindings({ name: 'bug-pattern', score, findings: findings.slice(0, 20) }, code));
   } catch {
-    teams.push(runBugPatternCheck(code, language));
+    teams.push(filterTeamFindings(runBugPatternCheck(code, language), code));
   }
 
-  // Team 8: Security Pattern (npm audit 시도 + regex 병행)
-  const secRegex = runSecurityPatternCheck(code, language);
-  teams.push(secRegex);
+  // Team 8: Security Pattern
+  teams.push(filterTeamFindings(runSecurityPatternCheck(code, language), code));
 
   // ── Verdict 변환: score 기반 → level 기반 ──
   const verdictTeams: PipelineResult['teams'] = teams.map(t => ({
