@@ -37,13 +37,14 @@ export interface BadgeContext {
   consecutivePasses: number;
   hollowCount: number;
   maxScore: number;
+  speedFixes: number;
 }
 
 export const BADGES: Badge[] = [
   { id: 'first-blood', name: 'First Blood', icon: '✨', description: '첫 벤치마크 완료', condition: ctx => ctx.totalGenerations >= 1 },
   { id: 'guardian', name: 'Guardian', icon: '🛡️', description: 'Shield 90+ 달성', condition: ctx => ctx.receipts.some(r => (r.pipeline.teams.find(t => t.name === 'release-ip')?.score ?? 0) >= 90) },
   { id: 'clean-code', name: 'Clean Code', icon: '🧹', description: '빈깡통 0 달성', condition: ctx => ctx.hollowCount === 0 && ctx.totalGenerations >= 3 },
-  { id: 'sub-10', name: 'Sub-10ms', icon: '⚡', description: '전체 함수 p99 < 10ms', condition: ctx => ctx.avgScore >= 90 },
+  { id: 'speed-demon', name: 'Speed Demon', icon: '⚡', description: '3초 이내 수정 10회', condition: ctx => ctx.speedFixes >= 10 },
   { id: 'top-10', name: 'Top 10%', icon: '🔥', description: '글로벌 상위 10%', condition: ctx => ctx.maxScore >= 9000 },
   { id: 'improver', name: 'Improver', icon: '📈', description: '점수 +20 개선', condition: ctx => {
     if (ctx.receipts.length < 2) return false;
@@ -52,7 +53,7 @@ export const BADGES: Badge[] = [
     return last - first >= 20;
   }},
   { id: 'streak-5', name: 'Clean Streak', icon: '🎯', description: '5회 연속 통과', condition: ctx => ctx.consecutivePasses >= 5 },
-  { id: 'streak-10', name: 'Perfect Streak', icon: '💎', description: '10회 ��속 통과', condition: ctx => ctx.consecutivePasses >= 10 },
+  { id: 'streak-10', name: 'Perfect Streak', icon: '💎', description: '10회 연속 통과', condition: ctx => ctx.consecutivePasses >= 10 },
   { id: 'centurion', name: 'Centurion', icon: '💯', description: '100회 생성', condition: ctx => ctx.totalGenerations >= 100 },
   { id: 'perfect', name: 'Perfect Score', icon: '🌟', description: '종합 95+ 달성', condition: ctx => ctx.maxScore >= 95 },
   { id: 'marathon', name: 'Marathon', icon: '🏃', description: '50회 생성', condition: ctx => ctx.totalGenerations >= 50 },
@@ -71,7 +72,7 @@ export const CHALLENGES: Challenge[] = [
     check: ctx => ({ progress: ctx.hollowCount === 0 ? 1 : 0, total: 1 }),
   },
   {
-    id: 'speed-demon', name: 'Speed Demon', icon: '��',
+    id: 'speed-demon', name: 'Speed Demon', icon: '⚡',
     description: '평균 점수 90+ 달성', goal: '⚡ Turbo Badge',
     check: ctx => ({ progress: Math.min(ctx.avgScore, 90), total: 90 }),
   },

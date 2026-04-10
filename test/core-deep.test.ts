@@ -1441,24 +1441,29 @@ describe('core/rule-catalog', () => {
 
 describe('core/detector-registry', () => {
   test('DetectorRegistry can register and retrieve detectors', () => {
-    const { DetectorRegistry } = require('../core/detector-registry');
-    const registry = new DetectorRegistry();
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+    try {
+      const { DetectorRegistry } = require('../core/detector-registry');
+      const registry = new DetectorRegistry();
 
-    const mockDetector = {
-      ruleId: 'TEST-999',
-      detect: () => [],
-    };
+      const mockDetector = {
+        ruleId: 'TEST-999',
+        detect: () => [],
+      };
 
-    // register (will warn about missing rule in catalog but shouldn't throw)
-    registry.register(mockDetector);
+      // register (warns when rule missing from catalog; suppressed to avoid Jest noise)
+      registry.register(mockDetector);
 
-    const detectors = registry.getDetectors();
-    expect(detectors.length).toBe(1);
-    expect(detectors[0].ruleId).toBe('TEST-999');
+      const detectors = registry.getDetectors();
+      expect(detectors.length).toBe(1);
+      expect(detectors[0].ruleId).toBe('TEST-999');
 
-    const status = registry.getRegistryStatus();
-    expect(status.connected).toBe(1);
-    expect(status.registeredRules).toContain('TEST-999');
+      const status = registry.getRegistryStatus();
+      expect(status.connected).toBe(1);
+      expect(status.registeredRules).toContain('TEST-999');
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });
 

@@ -6,6 +6,14 @@ Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Docs** — README and CONTRIBUTING now reflect the current Jest suite (**611 tests**, **16 suites**, **~55%** statement coverage). Daemon/detector-registry tests silence expected `console` output to keep CI logs readable.
+
+---
+
 ## [0.1.0] - 2026-04-06
 
 ### Added

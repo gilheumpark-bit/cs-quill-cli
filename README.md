@@ -12,8 +12,8 @@
 > *A hedgehog's quills protect it from threats. CS Quill's 56 engines protect your code from bugs, vulnerabilities, and tech debt.*
 
 [![CI](https://github.com/gilheumpark-bit/cs-quill-cli/actions/workflows/ci.yml/badge.svg)](https://github.com/gilheumpark-bit/cs-quill-cli/actions)
-[![Tests](https://img.shields.io/badge/tests-411%20passed-brightgreen)](https://github.com/gilheumpark-bit/cs-quill-cli)
-[![Coverage](https://img.shields.io/badge/coverage-43%25%20stmts-yellow)](https://github.com/gilheumpark-bit/cs-quill-cli)
+[![Tests](https://img.shields.io/badge/tests-611%20passed-brightgreen)](https://github.com/gilheumpark-bit/cs-quill-cli)
+[![Coverage](https://img.shields.io/badge/coverage-55%25%20stmts-yellow)](https://github.com/gilheumpark-bit/cs-quill-cli)
 [![License](https://img.shields.io/badge/license-Dual%20(CC--BY--NC%20%2B%20Commercial)-blue)](./LICENSE)
 
 ---
@@ -37,8 +37,8 @@ CS Quill is a **local-first, AI-powered code quality CLI** that integrates 56 op
 ### Battle-Tested
 
 ```
-411/411 automated tests PASSED (10 suites, 0 skip, 0 fail)
-  ~43% statement coverage
+611/611 automated tests PASSED (16 suites, 0 skip, 0 fail)
+  ~55% statement coverage (Jest; see npm test output)
 
 46 manual E2E tests PASSED
 7 AI integration tests PASSED (Gemini 2.5 Flash)
@@ -48,7 +48,7 @@ Load/stress testing: configurable via `cs stress --url`
 Sandbox escape: 9/10 blocked (process, require, eval, Function)
 npm audit: 0 vulnerabilities
 
-Last verified: 2026-04-06
+Last verified: 2026-04-07
 ```
 
 ---
@@ -328,12 +328,12 @@ CS Quill works without any AI API connection:
 # .github/workflows/ci.yml
 # Runs on: ubuntu-latest + windows-latest
 # Node versions: 18, 20, 22
-# Steps: install → build → test (411 tests) → smoke test
+# Steps: install → build → test (611 tests) → smoke test
 ```
 
 ```bash
 npm run build          # TypeScript → dist/
-npm test               # 411 tests, 0 fail
+npm test               # 611 tests, 0 fail
 npm run test:coverage  # Coverage report
 npm run test:ci        # CI mode (--ci --coverage --forceExit)
 ```

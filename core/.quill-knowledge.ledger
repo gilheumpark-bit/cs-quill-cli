@@ -1,0 +1,6 @@
+{"timestamp":"2026-04-08T08:45:50.242Z","fileName":"test-success.ts","repairCount":1,"ruleStats":{"LOG-001":"success"}}
+{"timestamp":"2026-04-08T08:45:51.263Z","fileName":"test-failure.ts","repairCount":1,"ruleStats":{"SEC-006":"failure"}}
+{"timestamp":"2026-04-08T08:47:12.893Z","fileName":"C:\\eh-universe-web\\cs-quill-cli\\core\\impact-lib.ts","repairCount":1,"ruleStats":{"LOG-001":"failure"}}
+{"timestamp":"2026-04-08T08:47:31.408Z","fileName":"C:\\eh-universe-web\\cs-quill-cli\\core\\impact-lib.ts","repairCount":1,"ruleStats":{"LOG-001":"failure"}}
+{"timestamp":"2026-04-08T08:47:50.769Z","fileName":"C:\\eh-universe-web\\cs-quill-cli\\core\\impact-lib.ts","repairCount":1,"ruleStats":{"LOG-001":"failure"}}
+{"timestamp":"2026-04-08T08:49:24.227Z","fileName":"risky.ts","repairCount":3,"ruleStats":{"API-002":"success","API-003":"success","API-007":"success"}}

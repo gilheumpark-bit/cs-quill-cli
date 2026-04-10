@@ -18,7 +18,7 @@ git clone https://github.com/gilheumpark-bit/cs-quill-cli.git
 cd cs-quill-cli
 npm install
 npm run build        # TypeScript -> dist/
-npm test             # Must pass all 411 tests
+npm test             # Must pass all 611 tests
 npm run test:coverage
 ```
 
@@ -31,7 +31,7 @@ src/
   adapters/       # 18 integrations (security, perf, git, search, license, SBOM, etc.)
   ai/             # AI orchestration, SEAL contracts, multi-key fallback, judge system
   daemon/         # WebSocket + HTTP server (port 8443)
-tests/            # 10 test suites, 411 tests (Vitest)
+test/             # 16 test suites, 611 tests (Jest + ts-jest)
 ```
 
 ## Coding Standards
@@ -45,10 +45,10 @@ tests/            # 10 test suites, 411 tests (Vitest)
 
 ## Test Requirements
 
-- All PRs must pass the full test suite: **411+ tests, 0 failures**.
+- All PRs must pass the full test suite: **611 tests, 0 failures**.
 - New features require accompanying tests.
 - Run `npm run test:ci` to simulate CI conditions (coverage + forceExit).
-- Aim to maintain or improve the current ~43% statement coverage.
+- Aim to maintain or improve the current ~55% statement coverage.
 
 ## Pull Request Guidelines
 

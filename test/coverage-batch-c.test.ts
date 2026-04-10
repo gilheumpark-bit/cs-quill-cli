@@ -478,10 +478,18 @@ describe('daemon.ts unit tests', () => {
   // --- Session management via startDaemon health endpoint ---
 
   test('startDaemon health endpoint returns JSON with status ok', (done) => {
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
     const http = require('http');
     const { startDaemon } = require('../daemon');
     const port = 19876 + Math.floor(Math.random() * 1000);
     const daemon = startDaemon({ port, host: '127.0.0.1' });
+
+    const finish = (err?: Error) => {
+      logSpy.mockRestore();
+      warnSpy.mockRestore();
+      done(err);
+    };
 
     // Wait for server to start, then query /health
     setTimeout(() => {
@@ -495,14 +503,17 @@ describe('daemon.ts unit tests', () => {
             expect(parsed).toHaveProperty('connections');
             expect(parsed).toHaveProperty('uptime');
             expect(parsed).toHaveProperty('version');
-          } finally {
+          } catch (e) {
             await daemon.stop();
-            done();
+            finish(e as Error);
+            return;
           }
+          await daemon.stop();
+          finish();
         });
       }).on('error', async (err: Error) => {
         await daemon.stop();
-        done(err);
+        finish(err);
       });
     }, 800);
   });

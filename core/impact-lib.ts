@@ -1,0 +1,1 @@
+export const check = (a: any) => a == 1;

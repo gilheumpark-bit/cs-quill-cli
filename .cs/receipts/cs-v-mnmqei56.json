@@ -1,0 +1,52 @@
+{
+  "id": "cs-v-mnmqei56",
+  "timestamp": 1775452206426,
+  "codeHash": "c837649cce43f2729138e72cc315207057ac82599a59be72765a477f22d14a54",
+  "pipeline": {
+    "teams": [
+      {
+        "name": "validation",
+        "score": 25,
+        "blocking": true,
+        "findings": 15,
+        "passed": false
+      },
+      {
+        "name": "governance",
+        "score": 25,
+        "blocking": false,
+        "findings": 15,
+        "passed": true
+      },
+      {
+        "name": "simulation",
+        "score": 95,
+        "blocking": false,
+        "findings": 1,
+        "passed": true
+      },
+      {
+        "name": "asset-trace",
+        "score": 25,
+        "blocking": false,
+        "findings": 15,
+        "passed": true
+      },
+      {
+        "name": "size-density",
+        "score": 45,
+        "blocking": false,
+        "findings": 11,
+        "passed": true
+      }
+    ],
+    "overallScore": 79,
+    "overallStatus": "review"
+  },
+  "verification": {
+    "rounds": 0,
+    "fixesApplied": 0,
+    "stopReason": "verify-only"
+  },
+  "receiptHash": "f8a0cf4c1a5c42de2b1967eba96df6d94ea127cdb123f288646fa8650baf9673"
+}

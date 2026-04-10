@@ -315,7 +315,7 @@ export async function runPreset(action: string, args?: string[]): Promise<void> 
       const path = join(getPresetDir(), `${args[0]}.json`);
       if (!existsSync(path)) { console.log(`  ⚠️  "${args[0]}" 설치되지 않음`); return; }
       unlinkSync(path);
-      console.log(`  🗑️  ${args[0]} 제��됨\n`);
+      console.log(`  🗑️  ${args[0]} 제거됨\n`);
       break;
     }
 

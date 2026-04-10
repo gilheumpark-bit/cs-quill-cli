@@ -26,6 +26,10 @@ program
 program
   .command('init')
   .description('프로젝트 초기화 (온보딩)')
+  .addHelpText(
+    'after',
+    '\n  대화형으로 언어·스택·API 키·PART 설정을 묻고 .cs/ 설정을 저장합니다.\n  처음이면 README의 Quick Start를 함께 보세요.\n',
+  )
   .action(async () => {
     const { runInit } = require('../commands/init');
     await runInit();

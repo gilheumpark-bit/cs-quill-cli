@@ -1,6 +1,7 @@
 // coverage-batch-a.test.ts — boost coverage for the 4 lowest-coverage files
 // targets: commands/preset.ts, adapters/test-engine.ts, commands/ip-scan.ts, adapters/git-enhanced.ts
 
+export {};
 const path = require('path');
 const fs = require('fs');
 const os = require('os');

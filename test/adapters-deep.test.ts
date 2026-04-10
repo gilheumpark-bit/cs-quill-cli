@@ -4,6 +4,7 @@
 // Covers: security-engine, dep-analyzer, git-enhanced,
 //         ast-engine, multi-lang
 
+export {};
 const path = require('path');
 
 // ============================================================

@@ -8,8 +8,12 @@ import * as net from 'net';
 
 let daemonProcess: { stop: () => void } | null = null;
 const PORT = 9876;
+let consoleLogSpy: jest.SpyInstance;
+let consoleWarnSpy: jest.SpyInstance;
 
 beforeAll((done) => {
+  consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+  consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
   const { startDaemon } = require('../daemon');
   daemonProcess = startDaemon({ port: PORT, host: '127.0.0.1' });
   setTimeout(done, 1000); // 서버 시작 대기
@@ -17,6 +21,8 @@ beforeAll((done) => {
 
 afterAll(async () => {
   if (daemonProcess) await daemonProcess.stop();
+  consoleLogSpy.mockRestore();
+  consoleWarnSpy.mockRestore();
 });
 
 // ============================================================

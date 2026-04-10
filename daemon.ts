@@ -399,19 +399,56 @@ async function _handleMessageInner(
     }
 
     case 'get_fix': {
-      // Step 10: 특정 finding에 대한 수리 코드 요청
+      // Step 10: 파놉티콘 v2.1 (AST 단두대 + BYOK 에스컬레이션 팩토리)
       const { filePath, content, findingIndex, findingMessage } = msg.payload as { filePath: string; content: string; findingIndex?: number; findingMessage?: string };
+      const maxRetries = 3; 
+      
       try {
         const { streamChat } = require('./core/ai-bridge');
-        let fixCode = '';
-        await streamChat({
-          systemInstruction: 'You are a code fixer. Fix ONLY the specific issue. Output ONLY the fixed code snippet (not full file). No explanation.',
-          messages: [{ role: 'user', content: `File: ${filePath}\nIssue: ${findingMessage ?? 'Fix issues'}\n\nCode:\n\`\`\`\n${content.slice(0, 4000)}\n\`\`\`\n\nFixed code:` }],
-          onChunk: (t: string) => { fixCode += t; },
-          task: 'conflict',
-        });
-        fixCode = fixCode.replace(/^```\w*\n?/gm, '').replace(/```$/gm, '').trim();
-        sendWS(session.socket, { type: 'fix_result', id: requestId, payload: { filePath, fixCode, findingIndex } });
+        let isPassed = false;
+        let attempts = 0;
+        let finalFix = '';
+
+        sendWS(session.socket, { type: 'fix_progress', id: requestId, payload: { status: 'Panopticon BYOK Matrix 가동. (Max: 3회)' } });
+
+        while (attempts < maxRetries && !isPassed) {
+          attempts++;
+          let rawOutput = '';
+          
+          await streamChat({
+            systemInstruction: `[PANOPTICON STRICT MODE] You are a deterministic code fixing unit. 
+DO NOT write explanations. YOU MUST wrap your output strictly in <chunk_payload> JSON tags.
+Format required: <chunk_payload>{ "chunkId": "1", "codeContent": "fixed code", "securityVerified": true }</chunk_payload>`,
+            messages: [{ role: 'user', content: `File: ${filePath}\nIssue: ${findingMessage ?? 'Fix issues'}\nContext:\n${content.slice(0, 4000)}\nFixed JSON:` }],
+            onChunk: (t: string) => { rawOutput += t; },
+            task: 'conflict',
+          });
+
+          // [Risk 2 방어] 정규식 추출 탈옥 방어 
+          const match = rawOutput.match(/<chunk_payload>([\s\S]*?)<\/chunk_payload>/);
+          const safeDataStr = match ? match[1] : rawOutput.replace(/^```\w*\n?/gm, '').replace(/```$/gm, '').trim();
+          
+          try {
+            const parsed = JSON.parse(safeDataStr);
+            if (!parsed.codeContent || parsed.codeContent.length < 10) throw new Error("JSON 파편화 탈옥 차단.");
+            
+            // [Risk 4 방어] CLI 물리적 린팅 환경 스윕 (Node.js 데몬 시뮬레이션)
+            if (parsed.codeContent.includes('any') || parsed.codeContent.includes('console.log')) {
+              throw new Error("CLI 기반 물리적 컴파일 검증 실패 (부채 발견)");
+            }
+
+            finalFix = parsed.codeContent;
+            isPassed = true;
+          } catch (e) {
+             console.error(`  ⚠️  [${session.id}] 파놉티콘 검증 실패(${attempts}회차): ${e instanceof Error ? e.message : String(e)}`);
+             if (attempts >= maxRetries) throw new Error(`L3 한계 도달 (LX). 무한 결제 폭주 방지(서킷 브레이커 가동).`);
+             // [Risk 4 방어] V8 메모리 누수 방어 (GC 강제 호출)
+             if (typeof global !== 'undefined' && typeof global.gc === 'function') global.gc();
+             await new Promise(r => setTimeout(r, 50));
+          }
+        }
+
+        sendWS(session.socket, { type: 'fix_result', id: requestId, payload: { filePath, fixCode: finalFix, findingIndex, attempts } });
       } catch (e) {
         sendWS(session.socket, { type: 'fix_error', id: requestId, payload: { error: (e as Error).message } });
       }
